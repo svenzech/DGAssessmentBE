@@ -1003,6 +1003,52 @@ app.post('/api/ingest/uploadjson', async (req, res) => {
   }
 });
 
+
+// Brief löschen
+app.delete('/api/briefs/:briefId', async (req, res) => {
+  const { briefId } = req.params;
+
+  try {
+    const { error } = await supabase
+      .from('briefs')
+      .delete()
+      .eq('id', briefId);
+
+    if (error) {
+      console.error('Fehler in DELETE /api/briefs/:briefId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    // 204: erfolgreich, kein Body
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in DELETE /api/briefs/:briefId:', e);
+    return res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Sheet löschen
+app.delete('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+
+  try {
+    const { error } = await supabase
+      .from('overleitung_sheets')
+      .delete()
+      .eq('id', sheetId);
+
+    if (error) {
+      console.error('Fehler in DELETE /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in DELETE /api/sheets/:sheetId:', e);
+    return res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
 // Kein eigener 404-Handler – den übernimmt Flowise für Nicht-/api-Routen.
 
 // ----------------------------------------
