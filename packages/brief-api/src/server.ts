@@ -139,7 +139,7 @@ app.get('/api/sheets/:sheetId', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('overleitung_sheets')
-      .select('id, name, theme, status, version, created_at, theme_target_descr')
+      .select('id, name, theme, status, version, created_at, theme_target_description')
       .eq('id', sheetId)
       .maybeSingle();
 
@@ -181,7 +181,7 @@ app.patch('/api/sheets/:sheetId', async (req, res) => {
       .from('overleitung_sheets')
       .update(updates)
       .eq('id', sheetId)
-      .select('id, name, theme, status, version, created_at, theme_target_descr')
+      .select('id, name, theme, status, version, created_at, theme_target_description')
       .single();
 
     if (error) {
@@ -265,7 +265,7 @@ app.put('/api/sheets/:sheetId', async (req, res) => {
       .from('overleitung_sheets')
       .update(payload)
       .eq('id', sheetId)
-      .select('id, name, theme, status, version, created_at, theme_target_descr')
+      .select('id, name, theme, status, version, created_at, theme_target_description')
       .maybeSingle();
 
     if (error) {
