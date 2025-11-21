@@ -18,8 +18,6 @@ dotenv.config({ path: path.join(ROOT, '.env') });
 const FLOWISE_TARGET = process.env.FLOWISE_TARGET ?? 'http://127.0.0.1:4000';
 console.log('FLOWISE_TARGET =', FLOWISE_TARGET);
 
-
-
 // ----------------------------------------
 // Eigene Imports
 // ----------------------------------------
@@ -69,8 +67,6 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'brief-api' });
 });
 
-
-
 // ---- Briefs: Liste ----
 app.get('/api/briefs', async (_req, res) => {
   try {
@@ -90,7 +86,6 @@ app.get('/api/briefs', async (_req, res) => {
     res.status(500).json({ error: e.message ?? 'Unknown error' });
   }
 });
-
 
 app.patch('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
@@ -117,7 +112,7 @@ app.patch('/api/briefs/:briefId', async (req, res) => {
       .update(updates)
       .eq('id', briefId)
       .select(
-        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at'
+        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at',
       )
       .single();
 
@@ -137,14 +132,14 @@ app.patch('/api/briefs/:briefId', async (req, res) => {
   }
 });
 
-
+// ---- Sheets: Detail (ohne Fragen) ----
 app.get('/api/sheets/:sheetId', async (req, res) => {
   const { sheetId } = req.params;
 
   try {
     const { data, error } = await supabase
       .from('overleitung_sheets')
-      .select('id, name, theme, status, version, created_at')
+      .select('id, name, theme, status, version, created_at, theme_target_descr')
       .eq('id', sheetId)
       .maybeSingle();
 
@@ -163,7 +158,6 @@ app.get('/api/sheets/:sheetId', async (req, res) => {
     res.status(500).json({ error: e.message ?? 'Unknown error' });
   }
 });
-
 
 app.patch('/api/sheets/:sheetId', async (req, res) => {
   const { sheetId } = req.params;
@@ -187,7 +181,7 @@ app.patch('/api/sheets/:sheetId', async (req, res) => {
       .from('overleitung_sheets')
       .update(updates)
       .eq('id', sheetId)
-      .select('id, name, theme, status, version, created_at')
+      .select('id, name, theme, status, version, created_at, theme_target_descr')
       .single();
 
     if (error) {
@@ -205,7 +199,6 @@ app.patch('/api/sheets/:sheetId', async (req, res) => {
     res.status(500).json({ error: e.message ?? 'Unknown error' });
   }
 });
-
 
 // ---- Sheets: Liste aller Überleitungssheets ----
 app.get('/api/sheets', async (_req, res) => {
@@ -228,15 +221,12 @@ app.get('/api/sheets', async (_req, res) => {
   }
 });
 
-
-
-// Brief aktualisieren
+// Brief aktualisieren (vollständig)
 app.put('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
   const payload = req.body ?? {};
 
-  // Primärschlüssel nicht überschreiben
-  delete payload.id;
+  delete payload.id; // Primärschlüssel nicht überschreiben
 
   try {
     const { data, error } = await supabase
@@ -263,9 +253,7 @@ app.put('/api/briefs/:briefId', async (req, res) => {
   }
 });
 
-
-
-// Sheet aktualisieren
+// Sheet aktualisieren (vollständig)
 app.put('/api/sheets/:sheetId', async (req, res) => {
   const { sheetId } = req.params;
   const payload = req.body ?? {};
@@ -295,7 +283,162 @@ app.put('/api/sheets/:sheetId', async (req, res) => {
   }
 });
 
+// ----------------------------------------
+// Sheet-Questions (NEU)
+// ----------------------------------------
 
+// Alle Fragen eines Sheets laden
+app.get('/api/sheets/:sheetId/questions', async (req, res) => {
+  const { sheetId } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('sheet_questions')
+      .select(
+        'id, sheet_id, code, question, checkpoints, order_index, active, created_at',
+      )
+      .eq('sheet_id', sheetId)
+      .order('order_index', { ascending: true });
+
+    if (error) {
+      console.error(
+        'Fehler in GET /api/sheets/:sheetId/questions:',
+        error,
+      );
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? []);
+  } catch (e: any) {
+    console.error(
+      'Unerwarteter Fehler in GET /api/sheets/:sheetId/questions:',
+      e,
+    );
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Fragen eines Sheets in einem Rutsch updaten (inkl. löschen/anlegen)
+app.put('/api/sheets/:sheetId/questions', async (req, res) => {
+  const { sheetId } = req.params;
+  const { questions } = req.body ?? {};
+
+  if (!Array.isArray(questions)) {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'Body muss ein Feld "questions" mit einem Array enthalten.',
+    });
+  }
+
+  try {
+    // 1) Vorhandene Fragen für dieses Sheet laden
+    const { data: existing, error: existingErr } = await supabase
+      .from('sheet_questions')
+      .select('id')
+      .eq('sheet_id', sheetId);
+
+    if (existingErr) {
+      console.error(
+        'Fehler beim Laden existierender Fragen in PUT /api/sheets/:sheetId/questions:',
+        existingErr,
+      );
+      return res.status(500).json({ error: existingErr.message });
+    }
+
+    const existingIds = new Set((existing ?? []).map((r: any) => r.id as string));
+
+    type IncomingQuestion = {
+      id?: string;
+      code: string;
+      question: string;
+      checkpoints: string[];
+      order_index?: number;
+      active?: boolean;
+    };
+
+    const toUpsert: any[] = [];
+    const seenIds = new Set<string>();
+
+    let idx = 0;
+    for (const q of questions as IncomingQuestion[]) {
+      const id = q.id && String(q.id).length > 0 ? String(q.id) : undefined;
+
+      if (id) {
+        seenIds.add(id);
+      }
+
+      toUpsert.push({
+        id,
+        sheet_id: sheetId,
+        code: q.code?.trim() ?? '',
+        question: q.question?.trim() ?? '',
+        checkpoints: Array.isArray(q.checkpoints) ? q.checkpoints : [],
+        order_index:
+          typeof q.order_index === 'number' ? q.order_index : idx,
+        active: q.active ?? true,
+      });
+
+      idx++;
+    }
+
+    // 3) Nicht mehr vorhandene Fragen löschen
+    const idsToDelete = [...existingIds].filter((id) => !seenIds.has(id));
+    if (idsToDelete.length > 0) {
+      const { error: delErr } = await supabase
+        .from('sheet_questions')
+        .delete()
+        .in('id', idsToDelete);
+
+      if (delErr) {
+        console.error(
+          'Fehler beim Löschen von Fragen in PUT /api/sheets/:sheetId/questions:',
+          delErr,
+        );
+        return res.status(500).json({ error: delErr.message });
+      }
+    }
+
+    // 4) Upsert aller (neuen + bestehenden) Fragen
+    if (toUpsert.length > 0) {
+      const { error: upErr } = await supabase
+        .from('sheet_questions')
+        .upsert(toUpsert, { onConflict: 'id' });
+
+      if (upErr) {
+        console.error(
+          'Fehler beim Upsert in PUT /api/sheets/:sheetId/questions:',
+          upErr,
+        );
+        return res.status(500).json({ error: upErr.message });
+      }
+    }
+
+    // 5) Aktualisierte Liste zurückgeben
+    const { data: finalList, error: finalErr } = await supabase
+      .from('sheet_questions')
+      .select(
+        'id, sheet_id, code, question, checkpoints, order_index, active, created_at',
+      )
+      .eq('sheet_id', sheetId)
+      .order('order_index', { ascending: true });
+
+    if (finalErr) {
+      console.error(
+        'Fehler beim Reload in PUT /api/sheets/:sheetId/questions:',
+        finalErr,
+      );
+      return res.status(500).json({ error: finalErr.message });
+    }
+
+    res.json(finalList ?? []);
+  } catch (e: any) {
+    console.error(
+      'Unerwarteter Fehler in PUT /api/sheets/:sheetId/questions:',
+      e,
+    );
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
 
 // ---- Briefs ----
 app.get('/api/briefs/:briefId', async (req, res) => {
@@ -714,7 +857,6 @@ app.post('/api/ingest/uploadjson', async (req, res) => {
     if (parseResult.kind === 'unknown') {
       return res.status(200).json(parseResult);
     }
-
 
     if (parseResult.kind === 'brief') {
       // Domäne bestimmen
