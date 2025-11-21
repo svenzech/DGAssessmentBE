@@ -92,6 +92,121 @@ app.get('/api/briefs', async (_req, res) => {
 });
 
 
+app.patch('/api/briefs/:briefId', async (req, res) => {
+  const { briefId } = req.params;
+  const { title, status, raw_markdown, version } = req.body ?? {};
+
+  try {
+    const updates: any = {};
+
+    if (typeof title === 'string') updates.title = title;
+    if (typeof status === 'string') updates.status = status;
+    if (typeof raw_markdown === 'string') updates.raw_markdown = raw_markdown;
+    if (typeof version === 'number') updates.version = version;
+
+    if (Object.keys(updates).length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Keine gültigen Felder zum Aktualisieren übergeben.' });
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('briefs')
+      .update(updates)
+      .eq('id', briefId)
+      .select(
+        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at'
+      )
+      .single();
+
+    if (error) {
+      console.error('Fehler in PATCH /api/briefs/:briefId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Brief nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PATCH /api/briefs/:briefId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+app.get('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .select('id, name, theme, status, version, created_at')
+      .eq('id', sheetId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in GET /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/sheets/:sheetId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+app.patch('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+  const { name, theme, status, version } = req.body ?? {};
+
+  try {
+    const updates: any = {};
+
+    if (typeof name === 'string') updates.name = name;
+    if (typeof theme === 'string') updates.theme = theme;
+    if (typeof status === 'string') updates.status = status;
+    if (typeof version === 'number') updates.version = version;
+
+    if (Object.keys(updates).length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Keine gültigen Felder zum Aktualisieren übergeben.' });
+    }
+
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .update(updates)
+      .eq('id', sheetId)
+      .select('id, name, theme, status, version, created_at')
+      .single();
+
+    if (error) {
+      console.error('Fehler in PATCH /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PATCH /api/sheets/:sheetId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
 // ---- Sheets: Liste aller Überleitungssheets ----
 app.get('/api/sheets', async (_req, res) => {
   try {
