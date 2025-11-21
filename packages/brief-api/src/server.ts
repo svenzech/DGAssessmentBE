@@ -244,7 +244,7 @@ app.post('/api/interviews/:interviewId/answers', async (req, res) => {
 
   try {
     const { interviewId } = req.params;
-    const { question_id, answer_json } = req.body ?? {};
+    const { answer_json } = req.body ?? {};
 
     if (!interviewId) {
       return res
@@ -260,10 +260,6 @@ app.post('/api/interviews/:interviewId/answers', async (req, res) => {
 
     const saved = await saveAnswer({
       interviewId,
-      questionId:
-        typeof question_id === 'string' && question_id.length > 0
-          ? question_id
-          : null,
       answerJson: answer_json,
     });
 

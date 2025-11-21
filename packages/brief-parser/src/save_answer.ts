@@ -23,7 +23,6 @@ const sb: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 
 export interface SaveAnswerInput {
   interviewId: string;
-  questionId?: string | null;
   /**
    * Frei strukturiertes JSON mit allem, was zu dieser Antwort gehört:
    * - question_text (vom LLM)
@@ -37,14 +36,13 @@ export interface SaveAnswerInput {
 export interface SavedAnswer {
   id: string;
   interview_id: string;
-  question_id: string | null;
   created_at: string;
 }
 
 // ===== Kernfunktion =====
 
 export async function saveAnswer(input: SaveAnswerInput): Promise<SavedAnswer> {
-  const { interviewId, questionId = null, answerJson } = input;
+  const { interviewId, answerJson } = input;
 
   // Optional: prüfen, ob Interview existiert und nicht completed/abandoned ist
   const { data: interview, error: iErr } = await sb
@@ -71,10 +69,9 @@ export async function saveAnswer(input: SaveAnswerInput): Promise<SavedAnswer> {
     .from('answers')
     .insert({
       interview_id: interviewId,
-      question_id: questionId,
       answer_json: answerJson,
     })
-    .select('id, interview_id, question_id, created_at')
+    .select('id, interview_id, created_at')
     .single();
 
   if (error) {
@@ -92,7 +89,6 @@ const isDirectRun =
 
 if (isDirectRun) {
   const interviewId = process.argv[2];
-  const questionIdArg = process.argv[3] || null;
   const answerJsonRaw = process.argv[4];
 
   if (!interviewId || !answerJsonRaw) {
@@ -115,7 +111,6 @@ if (isDirectRun) {
 
   saveAnswer({
     interviewId,
-    questionId: questionIdArg === 'null' ? null : questionIdArg,
     answerJson,
   })
     .then((saved) => {
