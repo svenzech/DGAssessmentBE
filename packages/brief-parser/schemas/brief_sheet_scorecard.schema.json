@@ -1,0 +1,199 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "BriefSheetScorecard",
+  "type": "object",
+  "required": [
+    "version",
+    "brief_id",
+    "sheet_id",
+    "theme",
+    "generated_at",
+    "answer_range",
+    "overall",
+    "questions"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "interview_eval_v1"
+    },
+    "brief_id": { "type": "string" },
+    "sheet_id": { "type": "string" },
+    "theme": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "answer_range": {
+      "type": "object",
+      "required": ["min_ts", "max_ts"],
+      "properties": {
+        "min_ts": { "type": ["string", "null"], "format": "date-time" },
+        "max_ts": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "overall": {
+      "type": "object",
+      "required": ["baseline_score", "final_score", "delta", "level", "rationale", "recommendations"],
+      "properties": {
+        "baseline_score": {
+          "type": ["number", "null"],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "final_score": {
+          "type": ["number", "null"],
+          "minimum": 1,
+          "maximum": 5
+        },
+        "delta": { "type": ["number", "null"] },
+        "level": {
+          "type": ["string", "null"],
+          "enum": ["red", "amber", "green", null]
+        },
+        "rationale": { "type": "string" },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "question_id",
+          "question_code",
+          "question",
+          "checkpoints",
+          "interview_contributions",
+          "final"
+        ],
+        "properties": {
+          "question_id": { "type": "string" },
+          "question_code": { "type": "string" },
+          "question": { "type": "string" },
+          "checkpoints": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "baseline": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": [
+                  "status",
+                  "score_1_5",
+                  "rationale",
+                  "open_questions",
+                  "evidence_from_brief"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": ["present", "partial", "absent", "unknown"]
+                  },
+                  "score_1_5": {
+                    "type": ["number", "null"],
+                    "minimum": 1,
+                    "maximum": 5
+                  },
+                  "rationale": { "type": "string" },
+                  "open_questions": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "evidence_from_brief": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["quote", "section", "confidence"],
+                      "properties": {
+                        "quote": { "type": "string" },
+                        "section": { "type": "string" },
+                        "confidence": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          },
+          "interview_contributions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "interview_id",
+                "answer_id",
+                "user_id",
+                "ts",
+                "summary",
+                "direction",
+                "impact",
+                "comment"
+              ],
+              "properties": {
+                "interview_id": { "type": "string" },
+                "answer_id": { "type": "string" },
+                "user_id": { "type": "string" },
+                "ts": { "type": "string", "format": "date-time" },
+                "summary": { "type": "string" },
+                "direction": {
+                  "type": "string",
+                  "enum": ["up", "down", "neutral"]
+                },
+                "impact": { "type": "number" },
+                "comment": { "type": "string" },
+                "evidence_from_answer": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["quote", "confidence"],
+                    "properties": {
+                      "quote": { "type": "string" },
+                      "confidence": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "final": {
+            "type": "object",
+            "required": ["status", "score_1_5", "delta_from_baseline", "rationale"],
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": ["present", "partial", "absent", "unknown"]
+              },
+              "score_1_5": {
+                "type": ["number", "null"],
+                "minimum": 1,
+                "maximum": 5
+              },
+              "delta_from_baseline": { "type": ["number", "null"] },
+              "rationale": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
