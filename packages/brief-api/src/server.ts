@@ -69,6 +69,119 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'brief-api' });
 });
 
+
+
+// ---- Briefs: Liste ----
+app.get('/api/briefs', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('briefs')
+      .select('id, title, domain_id, status, version, created_at')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Fehler in GET /api/briefs:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? []);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/briefs:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+// ---- Sheets: Liste aller Überleitungssheets ----
+app.get('/api/sheets', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .select('id, name, theme, status, version, created_at')
+      .order('theme', { ascending: true })
+      .order('version', { ascending: false });
+
+    if (error) {
+      console.error('Fehler in GET /api/sheets:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? []);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/sheets:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+
+// Brief aktualisieren
+app.put('/api/briefs/:briefId', async (req, res) => {
+  const { briefId } = req.params;
+  const payload = req.body ?? {};
+
+  // Primärschlüssel nicht überschreiben
+  delete payload.id;
+
+  try {
+    const { data, error } = await supabase
+      .from('briefs')
+      .update(payload)
+      .eq('id', briefId)
+      .select(
+        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at',
+      )
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in PUT /api/briefs/:briefId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Brief nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PUT /api/briefs/:briefId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+
+// Sheet aktualisieren
+app.put('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+  const payload = req.body ?? {};
+
+  delete payload.id;
+
+  try {
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .update(payload)
+      .eq('id', sheetId)
+      .select('id, name, theme, status, version, created_at, theme_target_descr')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in PUT /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+    if (!data) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PUT /api/sheets/:sheetId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
+
 // ---- Briefs ----
 app.get('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
