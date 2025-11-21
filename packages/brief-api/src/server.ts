@@ -487,11 +487,140 @@ app.post('/api/ingest/uploadjson', async (req, res) => {
       return res.status(200).json(parseResult);
     }
 
-    // (derselbe Brief/Sheet-Block wie oben – hier gekürzt, um Wiederholung zu vermeiden)
-    // Du kannst hier 1:1 den Code aus /api/ingest/upload übernehmen.
 
-    // Um den Umfang zu begrenzen, lass ihn vorerst so wie in Deiner aktuellen Version –
-    // funktional ändert sich am Proxy-Setup nichts.
+    if (parseResult.kind === 'brief') {
+      // Domäne bestimmen
+      let domainId: string | null = null;
+      const warnings = [...(parseResult.warnings ?? [])];
+
+      if (parseResult.domain_hint && parseResult.domain_hint.trim().length > 0) {
+        const hint = parseResult.domain_hint.trim();
+
+        const { data: domainRow, error: domainErr } = await supabase
+          .from('domains')
+          .select('id, name')
+          .ilike('name', `%${hint}%`)
+          .maybeSingle();
+
+        if (domainErr) {
+          console.error('Fehler beim Domänen-Lookup:', domainErr);
+          warnings.push(`Domänen-Lookup-Fehler: ${domainErr.message}`);
+        } else if (domainRow) {
+          domainId = domainRow.id;
+        } else {
+          warnings.push(
+            `Keine passende Domäne zu Hint "${hint}" gefunden – verwende Fallback.`,
+          );
+        }
+      }
+
+      if (!domainId) {
+        domainId = FALLBACK_DOMAIN_ID;
+        warnings.push(
+          `Keine Domäne erkannt – Fallback-Domäne ${FALLBACK_DOMAIN_ID} verwendet.`,
+        );
+      }
+
+      // Nächste freie Version bestimmen
+      let nextVersion = 1;
+
+      const { data: latestBrief, error: latestErr } = await supabase
+        .from('briefs')
+        .select('version')
+        .eq('domain_id', domainId)
+        .order('version', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (latestErr) {
+        console.error('Fehler beim Laden der letzten Version:', latestErr);
+        warnings.push(
+          `Version-Lookup-Fehler: ${latestErr.message} – setze version = 1.`,
+        );
+      } else if (latestBrief && latestBrief.version != null) {
+        nextVersion = Number(latestBrief.version) + 1;
+      }
+
+      const { data, error } = await supabase
+        .from('briefs')
+        .insert({
+          domain_id: domainId,
+          title: parseResult.title,
+          status: 'draft',
+          raw_markdown: parseResult.raw_text,
+          version: nextVersion,
+        })
+        .select('id, title, version')
+        .single();
+
+      if (error || !data) {
+        console.error('Supabase insert briefs failed:', error);
+        return res.status(500).json({
+          error: 'insert_failed',
+          message: error?.message ?? 'Fehler beim Speichern des Steckbriefs',
+        });
+      }
+
+      return res.status(200).json({
+        kind: 'brief',
+        brief_id: data.id,
+        title: data.title,
+        version: data.version,
+        warnings,
+      });
+    }
+
+    if (parseResult.kind === 'sheet') {
+      const { data: sheetRow, error: sheetErr } = await supabase
+        .from('overleitung_sheets')
+        .insert({
+          name: filename,
+          theme: parseResult.theme,
+          status: 'draft',
+        })
+        .select('id')
+        .single();
+
+      if (sheetErr || !sheetRow) {
+        console.error('Supabase insert overleitung_sheets failed:', sheetErr);
+        return res.status(500).json({
+          error: 'insert_failed (sheet)',
+          message:
+            sheetErr?.message ?? 'Fehler beim Speichern des Überleitungssheets',
+        });
+      }
+
+      const sheetId = sheetRow.id;
+      let orderIndex = 0;
+      const warnings = [...(parseResult.warnings ?? [])];
+
+      for (const q of parseResult.questions) {
+        const { error: qErr } = await supabase.from('sheet_questions').insert({
+          sheet_id: sheetId,
+          code: q.code,
+          question: q.question,
+          checkpoints: q.checkpoints,
+          order_index: orderIndex,
+          active: true,
+        });
+
+        if (qErr) {
+          console.error('Supabase insert sheet_questions failed:', qErr);
+          warnings.push(`Fehler bei Frage "${q.question}": ${qErr.message}`);
+        } else {
+          orderIndex++;
+        }
+      }
+
+      return res.status(200).json({
+        kind: 'sheet',
+        sheet_id: sheetId,
+        theme: parseResult.theme,
+        questions_imported: orderIndex,
+        warnings,
+      });
+    }
+
     return res
       .status(500)
       .json({ error: 'not_implemented', message: 'TODO: copy logic from /upload' });
