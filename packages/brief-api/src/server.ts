@@ -37,6 +37,7 @@ import { evaluateInterview } from '../../brief-parser/src/evaluate_interview';
 import { evaluateBriefSheet } from '../../brief-parser/src/evaluate_brief_sheet';
 import { supabase } from './supabase_client';
 import { classifyAndExtractUpload } from './llm_upload_parser';
+import test from 'node:test';
 
 // ----------------------------------------
 // Basis-Setup Express
@@ -229,7 +230,7 @@ app.post('/api/flowise/chat', async (req, res) => {
           // In Flowise kannst Du sie als {{$vars.INTERVIEW_ID}} verwenden,
           // z. B. für einen HTTP-Header x-interview-id.
           vars: {
-            INTERVIEW_ID: interviewId,
+            INTERVIEW_ID: 'tsdsdsest', //interviewId, 
           },
         },
       }),
