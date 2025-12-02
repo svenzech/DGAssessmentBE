@@ -86,11 +86,88 @@ app.post('/api/flowise/chat', async (req, res) => {
     const question = questionRaw.trim();
     const userIdentifier = user ?? userId ?? username ?? null;
 
-    // --- History → Flowise-Format ---------------------------
+    // ------------------------------
+    // 1) User + Interview Check
+    // ------------------------------
+    if (!userIdentifier || typeof userIdentifier !== 'string') {
+      return res.json({
+        answer:
+          'Es konnte kein gültiger Benutzername ermittelt werden. ' +
+          'Bitte tragen Sie oben einen gültigen Benutzernamen ein oder starten Sie den Chat direkt aus LearnWorlds.',
+        raw: '',
+      });
+    }
+
+    console.log('[FLOWISE_CHAT] userIdentifier =', userIdentifier);
+
+    const { data: userRow, error: userErr } = await supabase
+      .from('users')
+      .select('id, username')
+      .eq('username', userIdentifier)
+      .maybeSingle();
+
+    if (userErr) {
+      console.error('[FLOWISE_CHAT] Fehler beim User-Lookup:', userErr);
+      return res.status(500).json({
+        error: 'user_lookup_failed',
+        message:
+          'Fehler bei der Benutzerprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!userRow) {
+      return res.json({
+        answer:
+          `Für den Benutzernamen "${userIdentifier}" ist kein Zugang zum Interview verfügbar. ` +
+          'Bitte prüfen Sie Ihre Kurszuordnung oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    const userDbId = userRow.id as string;
+    console.log('[FLOWISE_CHAT] gefundener User id =', userDbId);
+
+    const { data: interviewRow, error: intErr } = await supabase
+      .from('interviews')
+      .select('id, status, created_at')
+      .eq('user_id', userDbId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (intErr) {
+      console.error(
+        '[FLOWISE_CHAT] Fehler beim Interview-Lookup für User',
+        userDbId,
+        intErr,
+      );
+      return res.status(500).json({
+        error: 'interview_lookup_failed',
+        message:
+          'Fehler bei der Interviewprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!interviewRow) {
+      return res.json({
+        answer:
+          'Für diesen Benutzer ist derzeit kein Interview hinterlegt. ' +
+          'Bitte starten Sie zunächst ein Interview im Editor oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    console.log(
+      '[FLOWISE_CHAT] Interview gefunden:',
+      interviewRow.id,
+      'Status =',
+      interviewRow.status,
+    );
+
+    // ------------------------------
+    // 2) Flowise-Aufruf
+    // ------------------------------
     const rawHistory = Array.isArray(history) ? history : [];
-
-    console.log('[FLOWISE_CHAT] rawHistory vom Frontend =', rawHistory);
-
     const normalizedHistory = rawHistory
       .map((item: any, idx: number) => {
         if (!item || typeof item.content !== 'string') {
@@ -123,11 +200,6 @@ app.post('/api/flowise/chat', async (req, res) => {
           x !== null,
       );
 
-    console.log(
-      '[FLOWISE_CHAT] normalizedHistory →',
-      JSON.stringify(normalizedHistory),
-    );
-
     const flowiseUrl = `${FLOWISE_TARGET.replace(
       /\/$/,
       '',
@@ -145,7 +217,7 @@ app.post('/api/flowise/chat', async (req, res) => {
       body: JSON.stringify({
         question,
         history: normalizedHistory,
-        overrideConfig: userIdentifier ? { user: userIdentifier } : {},
+        overrideConfig: { user: userIdentifier },
       }),
     });
 
@@ -160,81 +232,90 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-    // ---------------------------------------------
-    // Antwort aus Flowise parsen – auf LLM-Frage
-    // ---------------------------------------------
-    let answerText: string | undefined;
+    console.log(
+      '[FLOWISE_CHAT] Flowise OK, raw length =',
+      textBody.length,
+      'preview =',
+      textBody.slice(0, 200),
+    );
+
+    // ------------------------------
+    // 3) Bereinigung / Entschachtelung
+    // ------------------------------
+    let cleanedAnswer = textBody;
+    let meta: any = null;
 
     try {
-      const parsed: any = JSON.parse(textBody);
+      let outer: any = JSON.parse(textBody);
 
-      // 1. Klassischer Chatflow: { question, text, answer, ... }
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.question === 'string') {
-          answerText = parsed.question;
-        } else if (typeof parsed.text === 'string') {
-          answerText = parsed.text;
-        } else if (typeof parsed.answer === 'string') {
-          answerText = parsed.answer;
-        } else if (typeof parsed.message === 'string') {
-          answerText = parsed.message;
-        } else if (typeof parsed.output === 'string') {
-          answerText = parsed.output;
+      // a) Flowise gibt oft ein Array von Messages zurück
+      if (Array.isArray(outer) && outer.length > 0) {
+        const last = outer[outer.length - 1];
+        if (last && typeof last.text === 'string') {
+          outer = last.text;
         }
+      }
 
-        // 2. HTTP-Agent-Fall: deine Struktur mit nodeId / nodeLabel / data / responseBody
-        if (!answerText && parsed.data && parsed.data.responseBody) {
-          let rb: any = parsed.data.responseBody;
-
-          // responseBody ist häufig wiederum ein JSON-String
-          if (typeof rb === 'string') {
-            try {
-              rb = JSON.parse(rb);
-            } catch {
-              // ignorieren, dann bleibt rb der String
-            }
-          }
-
-          if (rb && typeof rb === 'object') {
-            if (typeof rb.llm_question === 'string') {
-              answerText = rb.llm_question;
-            } else if (typeof rb.question === 'string') {
-              answerText = rb.question;
-            }
+      // b) falls das jetzt ein JSON-String ist → erneut parsen
+      if (typeof outer === 'string') {
+        const trimmed = outer.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          try {
+            outer = JSON.parse(trimmed);
+          } catch {
+            // dann bleibt es ein String
           }
         }
+      }
 
-        // 3. Fallback: technische Felder wegwerfen und restliches JSON zeigen
-        if (!answerText) {
-          const clone: any = { ...parsed };
-          delete clone.status;
-          delete clone.success;
-          delete clone.stack;
-          answerText = JSON.stringify(clone);
+      // c) gewünschte Logik auf innerem Objekt
+      if (outer && typeof outer === 'object' && !Array.isArray(outer)) {
+        const inner = outer as any;
+        meta = inner;
+        const parts: string[] = [];
+
+        // 1) answer
+        if (typeof inner.answer === 'string' && inner.answer.trim().length > 0) {
+          parts.push(inner.answer.trim());
+        }
+
+        // 2) question oder llm_question
+        const qVal =
+          (typeof inner.question === 'string' &&
+          inner.question.trim().length > 0
+            ? inner.question.trim()
+            : null) ??
+          (typeof inner.llm_question === 'string' &&
+          inner.llm_question.trim().length > 0
+            ? inner.llm_question.trim()
+            : null);
+
+        if (qVal) {
+          parts.push(qVal);
+        }
+
+        // 3) text-Fallback nur, wenn nicht identisch zur Nutzereingabe
+        if (
+          parts.length === 0 &&
+          typeof inner.text === 'string' &&
+          inner.text.trim().length > 0 &&
+          inner.text.trim() !== question.trim()
+        ) {
+          parts.push(inner.text.trim());
+        }
+
+        if (parts.length > 0) {
+          cleanedAnswer = parts.join('\n\n');
         }
       }
     } catch (err) {
-      console.warn(
-        '[FLOWISE_CHAT] Antwort war kein JSON, gebe Text direkt zurück:',
-        err,
-      );
-      answerText = textBody;
+      console.warn('[FLOWISE_CHAT] Konnte Antwort nicht parsen, nutze raw.', err);
     }
-
-    if (!answerText) {
-      answerText = textBody;
-    }
-
-    console.log(
-      '[FLOWISE_CHAT] OK, Antwortlänge =',
-      answerText.length,
-      'Vorschau:',
-      answerText.slice(0, 200),
-    );
 
     return res.json({
-      answer: answerText,
+      answer: cleanedAnswer,
       raw: textBody,
+      meta,
     });
   } catch (e: any) {
     console.error('Unerwarteter Fehler in POST /api/flowise/chat:', e);
