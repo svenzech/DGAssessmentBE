@@ -59,8 +59,6 @@ app.use(express.json({ limit: '3mb' }));
 
 
 // ---- Flowise Chat ----
-// Einfache Chat-Proxy-Route für das Flowise-Chatflow
-
 // ---- Flowise Chat ----
 // Proxy-Endpoint für das Frontend: POST /api/flowise/chat
 app.post('/api/flowise/chat', async (req, res) => {
@@ -89,6 +87,48 @@ app.post('/api/flowise/chat', async (req, res) => {
     const question = questionRaw.trim();
     const userIdentifier = user ?? userId ?? username ?? null;
 
+    // --- History in Flowise-Format bringen ---------------------------
+    const rawHistory = Array.isArray(history) ? history : [];
+
+    console.log('[FLOWISE_CHAT] rawHistory vom Frontend =', rawHistory);
+
+    const normalizedHistory = rawHistory
+      .map((item: any, idx: number) => {
+        if (!item || typeof item.content !== 'string') {
+          console.warn(
+            '[FLOWISE_CHAT] History-Item ohne content übersprungen',
+            { idx, item },
+          );
+          return null;
+        }
+
+        const content = item.content;
+        const role = item.role;
+
+        if (role === 'user' || role === 'userMessage') {
+          return { role: 'userMessage', content };
+        }
+
+        if (role === 'assistant' || role === 'apiMessage') {
+          return { role: 'apiMessage', content };
+        }
+
+        console.warn(
+          '[FLOWISE_CHAT] History-Item mit unbekannter Rolle übersprungen',
+          { idx, role },
+        );
+        return null;
+      })
+      .filter(
+        (x): x is { role: 'userMessage' | 'apiMessage'; content: string } =>
+          x !== null,
+      );
+
+    console.log(
+      '[FLOWISE_CHAT] normalizedHistory →',
+      JSON.stringify(normalizedHistory),
+    );
+
     const flowiseUrl = `${FLOWISE_TARGET.replace(
       /\/$/,
       '',
@@ -97,7 +137,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     console.log('[FLOWISE_CHAT] Request →', flowiseUrl, {
       user: userIdentifier,
       question,
-      historyLen: Array.isArray(history) ? history.length : 0,
+      historyLen: normalizedHistory.length,
     });
 
     const fwRes = await fetch(flowiseUrl, {
@@ -105,7 +145,7 @@ app.post('/api/flowise/chat', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question,
-        history: Array.isArray(history) ? history : [],
+        history: normalizedHistory,
         overrideConfig: userIdentifier ? { user: userIdentifier } : {},
       }),
     });
@@ -121,15 +161,15 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
+    // Antwort aus Flowise parsen – status u.ä. ignorieren
     let answerText: string;
 
-    // Versuche, die Flowise-Antwort als JSON zu interpretieren
     try {
       const parsed = JSON.parse(textBody);
 
       if (parsed && typeof parsed === 'object') {
-        // Typischer Fall: { question: "...", status: "continue" }
         if (typeof parsed.question === 'string') {
+          // Dein Standardformat aus Flowise
           answerText = parsed.question;
         } else if (typeof parsed.text === 'string') {
           answerText = parsed.text;
@@ -140,7 +180,6 @@ app.post('/api/flowise/chat', async (req, res) => {
         } else if (typeof parsed.output === 'string') {
           answerText = parsed.output;
         } else {
-          // Fallback: status im JSON entfernen, aber NICHT per Regex im String
           const clone: any = { ...parsed };
           delete clone.status;
           delete clone.success;
@@ -153,7 +192,7 @@ app.post('/api/flowise/chat', async (req, res) => {
         answerText = textBody;
       }
     } catch {
-      // Kein JSON → wir verwenden den Text 1:1
+      // Kein JSON – einfach als Text zurückgeben
       answerText = textBody;
     }
 
