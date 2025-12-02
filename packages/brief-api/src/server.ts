@@ -1145,65 +1145,106 @@ app.post('/api/interviews/start-for-user', async (req, res) => {
   }
 });
 
-app.get('/api/interviews/:interviewId/context', async (req, res) => {
-  try {
-    const { interviewId } = req.params;
+app.get(
+  ['/api/interviews/:interviewId/context', '/api/interviews/context'],
+  async (req, res) => {
+    try {
+      const interviewId =
+        (req.header('x-interview-id') ?? '').trim() ||
+        (req.params.interviewId ?? '').trim();
 
-    if (!interviewId) {
-      return res
-        .status(400)
-        .json({ error: 'interviewId in der URL wird benötigt.' });
+      if (!interviewId) {
+        return res.status(400).json({
+          error: 'bad_request',
+          message:
+            'Es wurde keine Interview-ID übermittelt (Header x-interview-id oder URL-Parameter).',
+        });
+      }
+
+      const ctx = await loadInterviewContext(interviewId);
+      res.json(ctx);
+    } catch (e: any) {
+      console.error('Fehler in GET /api/interviews/.../context:', e);
+      res.status(500).json({ error: e.message ?? 'Unknown error' });
     }
+  },
+);
 
-    const ctx = await loadInterviewContext(interviewId);
-    res.json(ctx);
-  } catch (e: any) {
-    console.error('Fehler in /:interviewId/context:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
 
-app.post('/api/interviews/:interviewId/answers', async (req, res) => {
-  console.log('Hello answers!');
+app.post(
+  ['/api/interviews/:interviewId/answers', '/api/interviews/answers'],
+  async (req, res) => {
+    console.log('Hello answers!');
 
-  try {
-    const { interviewId } = req.params;
-    const { answer_json } = req.body ?? {};
+    try {
+      const interviewId =
+        (req.header('x-interview-id') ?? '').trim() ||
+        (req.params.interviewId ?? '').trim();
 
-    if (!interviewId) {
-      return res
-        .status(400)
-        .json({ error: 'interviewId in der URL wird benötigt.' });
+      const { answer_json } = req.body ?? {};
+
+      if (!interviewId) {
+        return res
+          .status(400)
+          .json({ error: 'bad_request', message: 'interviewId fehlt.' });
+      }
+
+      if (answer_json === undefined) {
+        return res
+          .status(400)
+          .json({ error: 'bad_request', message: 'answer_json fehlt.' });
+      }
+
+      const saved = await saveAnswer({
+        interviewId,
+        answerJson: answer_json,
+      });
+
+      res.json(saved);
+    } catch (e: any) {
+      console.error('Fehler in POST /api/interviews/.../answers:', e);
+      res.status(500).json({ error: e.message ?? 'Unknown error' });
     }
+  },
+);
 
-    if (answer_json === undefined) {
-      return res
-        .status(400)
-        .json({ error: 'answer_json im Body wird benötigt.' });
+app.post(
+  ['/api/interviews/:id/evaluate', '/api/interviews/evaluate'],
+  async (req, res) => {
+    try {
+      // 1) Interview-ID aus Header oder URL
+      const interviewId =
+        (req.header('x-interview-id') ?? '').trim() ||
+        (req.params.id ?? '').trim();
+
+      if (!interviewId) {
+        return res.status(400).json({
+          error: 'bad_request',
+          message:
+            'Keine Interview-ID übermittelt. Bitte übergeben Sie x-interview-id im Header oder :id in der URL.',
+        });
+      }
+
+      // 2) Auswertung starten
+      const result = await evaluateInterview(interviewId);
+
+      // 3) Response
+      return res.json({ data: result });
+    } catch (err: any) {
+      console.error(
+        'Error evaluating interview for id/header:',
+        err?.message ?? err
+      );
+
+      return res.status(500).json({
+        error: 'evaluate_failed',
+        message:
+          err?.message ?? 'Fehler bei evaluateInterview – bitte später erneut versuchen.',
+      });
     }
-
-    const saved = await saveAnswer({
-      interviewId,
-      answerJson: answer_json,
-    });
-
-    res.json(saved);
-  } catch (e: any) {
-    console.error('Fehler in POST /:interviewId/answers:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
   }
-});
+);
 
-app.post('/api/interviews/:id/evaluate', async (req, res) => {
-  try {
-    const interviewId = req.params.id;
-    const result = await evaluateInterview(interviewId);
-    res.json({ data: result });
-  } catch (err) {
-    console.error('Error evaluating interview', err);
-    res.status(500).json({ error: 'Failed to evaluate interview' });
-  }
-});
 
 //
 // ---- UPLOAD / INGEST -------------------------------------------------
