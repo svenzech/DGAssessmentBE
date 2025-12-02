@@ -67,6 +67,147 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'brief-api' });
 });
 
+// ---- Domains ----
+
+// Alle Domänen
+app.get('/api/domains', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('domains')
+      .select('id, name, description, created_at')
+      .order('name', { ascending: true });
+
+    if (error) {
+      console.error('Fehler in GET /api/domains:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? []);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/domains:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Neue Domäne anlegen
+app.post('/api/domains', async (req, res) => {
+  const { name, description } = req.body ?? {};
+
+  if (typeof name !== 'string' || name.trim().length === 0) {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'Feld "name" (string, nicht leer) wird benötigt.',
+    });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('domains')
+      .insert({
+        name: name.trim(),
+        description:
+          typeof description === 'string' && description.trim().length > 0
+            ? description.trim()
+            : null,
+      })
+      .select('id, name, description, created_at')
+      .single();
+
+    if (error) {
+      console.error('Fehler in POST /api/domains:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.status(201).json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in POST /api/domains:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Domäne aktualisieren (Name/Beschreibung)
+app.patch('/api/domains/:domainId', async (req, res) => {
+  const { domainId } = req.params;
+  const { name, description } = req.body ?? {};
+
+  try {
+    const updates: any = {};
+
+    if (typeof name === 'string' && name.trim().length > 0) {
+      updates.name = name.trim();
+    }
+    if (typeof description === 'string') {
+      updates.description =
+        description.trim().length > 0 ? description.trim() : null;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        error: 'bad_request',
+        message: 'Keine gültigen Felder zum Aktualisieren übergeben.',
+      });
+    }
+
+    const { data, error } = await supabase
+      .from('domains')
+      .update(updates)
+      .eq('id', domainId)
+      .select('id, name, description, created_at')
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in PATCH /api/domains/:domainId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Domäne nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PATCH /api/domains/:domainId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Domäne löschen
+app.delete('/api/domains/:domainId', async (req, res) => {
+  const { domainId } = req.params;
+
+  try {
+    const { error } = await supabase
+      .from('domains')
+      .delete()
+      .eq('id', domainId);
+
+    if (error) {
+      // Foreign-Key-Verletzung -> Domäne wird noch verwendet
+      if ((error as any).code === '23503') {
+        console.error(
+          'Domäne wird noch referenziert, DELETE /api/domains/:domainId:',
+          error,
+        );
+        return res.status(409).json({
+          error: 'domain_in_use',
+          message:
+            'Domäne kann nicht gelöscht werden, da sie noch von Steckbriefen verwendet wird.',
+        });
+      }
+
+      console.error('Fehler in DELETE /api/domains/:domainId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    // auch wenn keine Zeile betroffen war, ist das aus Sicht des Clients "ok"
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in DELETE /api/domains/:domainId:', e);
+    return res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+
 // ---- Briefs: Liste ----
 app.get('/api/briefs', async (_req, res) => {
   try {
@@ -89,7 +230,7 @@ app.get('/api/briefs', async (_req, res) => {
 
 app.patch('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
-  const { title, status, raw_markdown, version } = req.body ?? {};
+  const { title, status, raw_markdown, version, domain_id } = req.body ?? {};
 
   try {
     const updates: any = {};
@@ -98,6 +239,10 @@ app.patch('/api/briefs/:briefId', async (req, res) => {
     if (typeof status === 'string') updates.status = status;
     if (typeof raw_markdown === 'string') updates.raw_markdown = raw_markdown;
     if (typeof version === 'number') updates.version = version;
+    // Domäne darf string oder null sein
+    if (typeof domain_id === 'string' || domain_id === null) {
+      updates.domain_id = domain_id;
+    }
 
     if (Object.keys(updates).length === 0) {
       return res
