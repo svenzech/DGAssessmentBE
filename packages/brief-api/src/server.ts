@@ -161,57 +161,56 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     // ---------------------------------------------
-    // Antwort aus Flowise parsen – auf LLM-Frage
+    // Antwort aus Flowise parsen – HTTP-Agent zuerst
     // ---------------------------------------------
     let answerText: string | undefined;
 
     try {
       const parsed: any = JSON.parse(textBody);
 
-      // 1. Klassischer Chatflow: { question, text, answer, ... }
       if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.question === 'string') {
-          answerText = parsed.question;
-        } else if (typeof parsed.text === 'string') {
-          answerText = parsed.text;
-        } else if (typeof parsed.answer === 'string') {
-          answerText = parsed.answer;
-        } else if (typeof parsed.message === 'string') {
-          answerText = parsed.message;
-        } else if (typeof parsed.output === 'string') {
-          answerText = parsed.output;
-        }
+        // 1. HTTP-Agent-Fall: data.responseBody.{ llm_question | question }
+        let rb: any = parsed.data?.responseBody;
 
-        // 2. HTTP-Agent-Fall: deine Struktur mit nodeId / nodeLabel / data / responseBody
-        if (!answerText && parsed.data && parsed.data.responseBody) {
-          let rb: any = parsed.data.responseBody;
-
-          // responseBody ist häufig wiederum ein JSON-String
-          if (typeof rb === 'string') {
-            try {
-              rb = JSON.parse(rb);
-            } catch {
-              // ignorieren, dann bleibt rb der String
-            }
-          }
-
-          if (rb && typeof rb === 'object') {
-            if (typeof rb.llm_question === 'string') {
-              answerText = rb.llm_question;
-            } else if (typeof rb.question === 'string') {
-              answerText = rb.question;
-            }
+        if (typeof rb === 'string') {
+          try {
+            rb = JSON.parse(rb);
+          } catch {
+            // dann bleibt rb ein String
           }
         }
 
-        // 3. Fallback: technische Felder wegwerfen und restliches JSON zeigen
+        if (rb && typeof rb === 'object') {
+          if (typeof rb.llm_question === 'string') {
+            answerText = rb.llm_question;
+          } else if (typeof rb.question === 'string') {
+            answerText = rb.question;
+          }
+        }
+
+        // 2. Normaler Chatflow: klassische Felder
         if (!answerText) {
-          const clone: any = { ...parsed };
-          delete clone.status;
-          delete clone.success;
-          delete clone.stack;
-          answerText = JSON.stringify(clone);
+          if (typeof parsed.answer === 'string') {
+            answerText = parsed.answer;
+          } else if (typeof parsed.text === 'string') {
+            answerText = parsed.text;
+          } else if (typeof parsed.message === 'string') {
+            answerText = parsed.message;
+          } else if (typeof parsed.output === 'string') {
+            answerText = parsed.output;
+          } else if (typeof parsed.question === 'string') {
+            // ACHTUNG: erst ganz zum Schluss, weil das häufig die Eingabefrage ist
+            answerText = parsed.question;
+          } else {
+            const clone: any = { ...parsed };
+            delete clone.status;
+            delete clone.success;
+            delete clone.stack;
+            answerText = JSON.stringify(clone);
+          }
         }
+      } else if (typeof parsed === 'string') {
+        answerText = parsed;
       }
     } catch (err) {
       console.warn(
