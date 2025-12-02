@@ -73,10 +73,26 @@ app.post('/api/flowise/chat', async (req, res) => {
 
     if (!FLOWISE_CHATFLOW_ID) {
       return res.status(500).json({
-        error: 'missing_chatflow_id',
-        message: 'FLOWISE_CHATFLOW_ID ist nicht gesetzt.',
+        error: 'config_error',
+        message: 'FLOWISE_CHATFLOW_ID ist nicht konfiguriert.',
       });
     }
+
+
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({
+        error: 'bad_request',
+        message: 'Feld "message" (string) wird benötigt.',
+      });
+    }
+
+    const endpoint = `${FLOWISE_TARGET.replace(
+      /\/$/,
+      '',
+    )}/api/v1/prediction/${FLOWISE_CHATFLOW_ID}`;
+
+    console.log('[FLOWISE_CHAT] Request →', endpoint, { user });
+
 
     const question = questionRaw.trim();
     const userIdentifier = user ?? userId ?? username ?? null;
@@ -94,15 +110,34 @@ app.post('/api/flowise/chat', async (req, res) => {
       }),
     });
 
+    const textBody = await fwRes.text();
+
     if (!fwRes.ok) {
       const txt = await fwRes.text().catch(() => '');
       console.error('Flowise-Fehler:', fwRes.status, txt);
-      return res.status(500).json({
+      return res.status(502).json({
         error: 'flowise_error',
-        status: fwRes.status,
-        message: txt || 'Fehler beim Aufruf von Flowise',
+        message: `Flowise antwortete mit Status ${fwRes.status}`,
+        details: textBody,
       });
     }
+
+
+        let parsed: any;
+    try {
+      parsed = JSON.parse(textBody);
+    } catch {
+      parsed = { text: textBody };
+    }
+
+    const answer =
+      parsed.text ??
+      parsed.answer ??
+      parsed.result ??
+      (typeof parsed === 'string' ? parsed : JSON.stringify(parsed));
+
+    console.log('[FLOWISE_CHAT] OK');
+
 
     const data: any = await fwRes.json().catch(() => ({}));
 
