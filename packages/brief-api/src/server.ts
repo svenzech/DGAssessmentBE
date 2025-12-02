@@ -15,8 +15,17 @@ dotenv.config({ path: path.join(ROOT, '.env') });
 // ----------------------------------------
 // Flowise-Target (interner Port 4000)
 // ----------------------------------------
+
 const FLOWISE_TARGET = process.env.FLOWISE_TARGET ?? 'http://127.0.0.1:4000';
 console.log('FLOWISE_TARGET =', FLOWISE_TARGET);
+
+// Chatflow-ID für Flowise-Chat (ENV setzen!)
+const FLOWISE_CHATFLOW_ID = process.env.FLOWISE_CHATFLOW_ID;
+if (!FLOWISE_CHATFLOW_ID) {
+  console.warn(
+    'WARNUNG: FLOWISE_CHATFLOW_ID ist nicht gesetzt – /api/flowise/chat wird nicht funktionieren.',
+  );
+}
 
 // ----------------------------------------
 // Eigene Imports
@@ -39,6 +48,87 @@ const API_PORT = Number(process.env.PORT ?? process.env.BRIEF_API_PORT ?? 4000);
 const FALLBACK_DOMAIN_ID =
   process.env.FALLBACK_DOMAIN_ID ?? '00000000-0000-0000-0000-000000000000';
 console.info('FALLBACK_DOMAIN_ID ist (' + FALLBACK_DOMAIN_ID + ').');
+
+
+// ---- Flowise Chat ----
+// Einfache Chat-Proxy-Route für das Flowise-Chatflow
+
+// ---- Flowise Chat ----
+// Proxy-Endpoint für das Frontend: POST /api/flowise/chat
+app.post('/api/flowise/chat', async (req, res) => {
+  try {
+    const { message, text, history, user, userId, username } = req.body ?? {};
+
+    const questionRaw =
+      (typeof message === 'string' && message.trim().length > 0 && message) ||
+      (typeof text === 'string' && text.trim().length > 0 && text) ||
+      null;
+
+    if (!questionRaw) {
+      return res.status(400).json({
+        error: 'bad_request',
+        message: 'Feld "message" (oder "text") im Body ist Pflicht.',
+      });
+    }
+
+    if (!FLOWISE_CHATFLOW_ID) {
+      return res.status(500).json({
+        error: 'missing_chatflow_id',
+        message: 'FLOWISE_CHATFLOW_ID ist nicht gesetzt.',
+      });
+    }
+
+    const question = questionRaw.trim();
+    const userIdentifier = user ?? userId ?? username ?? null;
+
+    // Request an Flowise: Standard-Prediction-Endpoint
+    const flowiseUrl = `${FLOWISE_TARGET}/api/v1/prediction/${FLOWISE_CHATFLOW_ID}`;
+
+    const fwRes = await fetch(flowiseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        history: Array.isArray(history) ? history : [],
+        overrideConfig: userIdentifier ? { user: userIdentifier } : {},
+      }),
+    });
+
+    if (!fwRes.ok) {
+      const txt = await fwRes.text().catch(() => '');
+      console.error('Flowise-Fehler:', fwRes.status, txt);
+      return res.status(500).json({
+        error: 'flowise_error',
+        status: fwRes.status,
+        message: txt || 'Fehler beim Aufruf von Flowise',
+      });
+    }
+
+    const data: any = await fwRes.json().catch(() => ({}));
+
+    // Robust Antwortfeld bestimmen
+    const answerText =
+      (typeof data.text === 'string' && data.text) ||
+      (typeof data.answer === 'string' && data.answer) ||
+      (typeof data.output === 'string' && data.output) ||
+      (typeof data.message === 'string' && data.message) ||
+      JSON.stringify(data);
+
+    // Möglichst kompatibel zum Frontend: answer UND message zurückgeben
+    return res.json({
+      answer: answerText,
+      message: answerText,
+      raw: data,
+    });
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in POST /api/flowise/chat:', e);
+    return res.status(500).json({
+      error: 'internal',
+      message: e?.message ?? 'Unbekannter Fehler',
+    });
+  }
+});
+
 
 // Upload-Konfiguration
 const upload = multer({
