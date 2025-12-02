@@ -87,7 +87,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     const userIdentifier = user ?? userId ?? username ?? null;
 
     // --------------------------------------------------
-    // NEU: Benutzer- und Interview-Check vor Flowise-Call
+    // NEU: Benutzer- und Interview-Check VOR Flowise
     // --------------------------------------------------
     if (!userIdentifier || typeof userIdentifier !== 'string') {
       // Kein sinnvoller Benutzername → klarer Hinweis
@@ -170,7 +170,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     );
 
     // --------------------------------------------------
-    // AB HIER: Dein bisheriger Flowise-Proxy unverändert
+    // AB HIER: Dein bisheriger Flowise-Proxy UNVERÄNDERT
     // --------------------------------------------------
 
     // --- History → Flowise-Format ---------------------------
@@ -247,17 +247,15 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-    // ---------------------------------------------
-    // Antwort aus Flowise parsen – auf LLM-Frage
-    // ---------------------------------------------
-    let answerText: string | undefined;
+    // Antwort aus Flowise parsen – status u.ä. ignorieren
+    let answerText: string;
 
     try {
-      const parsed: any = JSON.parse(textBody);
+      const parsed = JSON.parse(textBody);
 
-      // 1. Klassischer Chatflow: { question, text, answer, ... }
       if (parsed && typeof parsed === 'object') {
         if (typeof parsed.question === 'string') {
+          // Dein Standardformat aus Flowise
           answerText = parsed.question;
         } else if (typeof parsed.text === 'string') {
           answerText = parsed.text;
@@ -267,57 +265,24 @@ app.post('/api/flowise/chat', async (req, res) => {
           answerText = parsed.message;
         } else if (typeof parsed.output === 'string') {
           answerText = parsed.output;
-        }
-
-        // 2. HTTP-Agent-Fall: Struktur mit nodeId / nodeLabel / data / responseBody
-        if (!answerText && parsed.data && parsed.data.responseBody) {
-          let rb: any = parsed.data.responseBody;
-
-          // responseBody ist häufig wiederum ein JSON-String
-          if (typeof rb === 'string') {
-            try {
-              rb = JSON.parse(rb);
-            } catch {
-              // ignorieren, dann bleibt rb String
-            }
-          }
-
-          if (rb && typeof rb === 'object') {
-            if (typeof rb.llm_question === 'string') {
-              answerText = rb.llm_question;
-            } else if (typeof rb.question === 'string') {
-              answerText = rb.question;
-            }
-          }
-        }
-
-        // 3. Fallback: technische Felder wegwerfen und restliches JSON zeigen
-        if (!answerText) {
+        } else {
           const clone: any = { ...parsed };
           delete clone.status;
           delete clone.success;
           delete clone.stack;
           answerText = JSON.stringify(clone);
         }
+      } else if (typeof parsed === 'string') {
+        answerText = parsed;
+      } else {
+        answerText = textBody;
       }
-    } catch (err) {
-      console.warn(
-        '[FLOWISE_CHAT] Antwort war kein JSON, gebe Text direkt zurück:',
-        err,
-      );
+    } catch {
+      // Kein JSON – einfach als Text zurückgeben
       answerText = textBody;
     }
 
-    if (!answerText) {
-      answerText = textBody;
-    }
-
-    console.log(
-      '[FLOWISE_CHAT] OK, Antwortlänge =',
-      answerText.length,
-      'Vorschau:',
-      answerText.slice(0, 200),
-    );
+    console.log('[FLOWISE_CHAT] OK, Antwortlänge =', answerText.length);
 
     return res.json({
       answer: answerText,
