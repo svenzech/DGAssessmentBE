@@ -87,10 +87,9 @@ app.post('/api/flowise/chat', async (req, res) => {
     const userIdentifier = user ?? userId ?? username ?? null;
 
     // --------------------------------------------------
-    // NEU: Benutzer- und Interview-Check VOR Flowise
+    // Benutzer- und Interview-Check VOR Flowise
     // --------------------------------------------------
     if (!userIdentifier || typeof userIdentifier !== 'string') {
-      // Kein sinnvoller Benutzername → klarer Hinweis
       return res.json({
         answer:
           'Es konnte kein gültiger Benutzername ermittelt werden. ' +
@@ -118,7 +117,6 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     if (!userRow) {
-      // Benutzername existiert nicht in users → kein Zugang
       return res.json({
         answer:
           `Für den Benutzernamen "${userIdentifier}" ist kein Zugang zum Interview verfügbar. ` +
@@ -153,7 +151,6 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     if (!interviewRow) {
-      // User existiert, aber hat kein Interview
       return res.json({
         answer:
           'Für diesen Benutzer ist derzeit kein Interview hinterlegt. ' +
@@ -170,10 +167,9 @@ app.post('/api/flowise/chat', async (req, res) => {
     );
 
     // --------------------------------------------------
-    // AB HIER: Dein bisheriger Flowise-Proxy UNVERÄNDERT
+    // AB HIER: Proxy zu Flowise, Antwort nur durchreichen
     // --------------------------------------------------
 
-    // --- History → Flowise-Format ---------------------------
     const rawHistory = Array.isArray(history) ? history : [];
 
     console.log('[FLOWISE_CHAT] rawHistory vom Frontend =', rawHistory);
@@ -247,45 +243,18 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-    // Antwort aus Flowise parsen – status u.ä. ignorieren
-    let answerText: string;
+    console.log(
+      '[FLOWISE_CHAT] Flowise OK, raw length =',
+      textBody.length,
+      'preview =',
+      textBody.slice(0, 200),
+    );
 
-    try {
-      const parsed = JSON.parse(textBody);
-
-      if (parsed && typeof parsed === 'object') {
-        if (typeof parsed.question === 'string') {
-          // Dein Standardformat aus Flowise
-          answerText = parsed.question;
-        } else if (typeof parsed.text === 'string') {
-          answerText = parsed.text;
-        } else if (typeof parsed.answer === 'string') {
-          answerText = parsed.answer;
-        } else if (typeof parsed.message === 'string') {
-          answerText = parsed.message;
-        } else if (typeof parsed.output === 'string') {
-          answerText = parsed.output;
-        } else {
-          const clone: any = { ...parsed };
-          delete clone.status;
-          delete clone.success;
-          delete clone.stack;
-          answerText = JSON.stringify(clone);
-        }
-      } else if (typeof parsed === 'string') {
-        answerText = parsed;
-      } else {
-        answerText = textBody;
-      }
-    } catch {
-      // Kein JSON – einfach als Text zurückgeben
-      answerText = textBody;
-    }
-
-    console.log('[FLOWISE_CHAT] OK, Antwortlänge =', answerText.length);
-
+    // WICHTIG: keine weitere Interpretation hier.
+    // Das Frontend macht die Logik "answer vor question", Status ignorieren usw.
     return res.json({
-      answer: answerText,
+      answer: textBody,
+      // optional, falls Du debuggen willst:
       raw: textBody,
     });
   } catch (e: any) {
