@@ -67,14 +67,16 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', service: 'brief-api' });
 });
 
-// ---- Domains ----
+//
+// ---- DOMAINS ---------------------------------------------------------
+//
 
-// Alle Domänen
+// Domänen-Liste
 app.get('/api/domains', async (_req, res) => {
   try {
     const { data, error } = await supabase
       .from('domains')
-      .select('id, name, description, created_at')
+      .select('id, name, description, created_at, updated_at')
       .order('name', { ascending: true });
 
     if (error) {
@@ -89,14 +91,41 @@ app.get('/api/domains', async (_req, res) => {
   }
 });
 
-// Neue Domäne anlegen
+// Einzelne Domäne
+app.get('/api/domains/:domainId', async (req, res) => {
+  const { domainId } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('domains')
+      .select('id, name, description, created_at, updated_at')
+      .eq('id', domainId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in GET /api/domains/:domainId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Domäne nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/domains/:domainId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Domäne anlegen
 app.post('/api/domains', async (req, res) => {
   const { name, description } = req.body ?? {};
 
-  if (typeof name !== 'string' || name.trim().length === 0) {
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
     return res.status(400).json({
       error: 'bad_request',
-      message: 'Feld "name" (string, nicht leer) wird benötigt.',
+      message: 'Feld "name" (string) ist Pflicht.',
     });
   }
 
@@ -106,16 +135,17 @@ app.post('/api/domains', async (req, res) => {
       .insert({
         name: name.trim(),
         description:
-          typeof description === 'string' && description.trim().length > 0
-            ? description.trim()
-            : null,
+          typeof description === 'string' ? description.trim() : null,
       })
-      .select('id, name, description, created_at')
+      .select('id, name, description, created_at, updated_at')
       .single();
 
-    if (error) {
+    if (error || !data) {
       console.error('Fehler in POST /api/domains:', error);
-      return res.status(500).json({ error: error.message });
+      return res.status(500).json({
+        error: 'insert_failed',
+        message: error?.message ?? 'Fehler beim Anlegen der Domäne',
+      });
     }
 
     res.status(201).json(data);
@@ -125,7 +155,7 @@ app.post('/api/domains', async (req, res) => {
   }
 });
 
-// Domäne aktualisieren (Name/Beschreibung)
+// Domäne ändern (nur Name/Beschreibung)
 app.patch('/api/domains/:domainId', async (req, res) => {
   const { domainId } = req.params;
   const { name, description } = req.body ?? {};
@@ -133,12 +163,20 @@ app.patch('/api/domains/:domainId', async (req, res) => {
   try {
     const updates: any = {};
 
-    if (typeof name === 'string' && name.trim().length > 0) {
+    if (typeof name === 'string') {
+      if (name.trim().length === 0) {
+        return res.status(400).json({
+          error: 'bad_request',
+          message: 'Feld "name" darf nicht leer sein.',
+        });
+      }
       updates.name = name.trim();
     }
+
     if (typeof description === 'string') {
-      updates.description =
-        description.trim().length > 0 ? description.trim() : null;
+      updates.description = description.trim();
+    } else if (description === null) {
+      updates.description = null;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -152,7 +190,7 @@ app.patch('/api/domains/:domainId', async (req, res) => {
       .from('domains')
       .update(updates)
       .eq('id', domainId)
-      .select('id, name, description, created_at')
+      .select('id, name, description, created_at, updated_at')
       .maybeSingle();
 
     if (error) {
@@ -171,7 +209,7 @@ app.patch('/api/domains/:domainId', async (req, res) => {
   }
 });
 
-// Domäne löschen
+// Domäne löschen (verhindert durch FK, wenn noch in Benutzung)
 app.delete('/api/domains/:domainId', async (req, res) => {
   const { domainId } = req.params;
 
@@ -199,7 +237,6 @@ app.delete('/api/domains/:domainId', async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
-    // auch wenn keine Zeile betroffen war, ist das aus Sicht des Clients "ok"
     return res.status(204).send();
   } catch (e: any) {
     console.error('Unerwarteter Fehler in DELETE /api/domains/:domainId:', e);
@@ -207,8 +244,11 @@ app.delete('/api/domains/:domainId', async (req, res) => {
   }
 });
 
+//
+// ---- BRIEFS ----------------------------------------------------------
+//
 
-// ---- Briefs: Liste ----
+// Briefs: Liste
 app.get('/api/briefs', async (_req, res) => {
   try {
     const { data, error } = await supabase
@@ -228,9 +268,10 @@ app.get('/api/briefs', async (_req, res) => {
   }
 });
 
+// Brief patchen (Titel, Status, Domäne, Markdown – aber NICHT Version)
 app.patch('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
-  const { title, status, raw_markdown, version, domain_id } = req.body ?? {};
+  const { title, status, raw_markdown, domain_id } = req.body ?? {};
 
   try {
     const updates: any = {};
@@ -238,11 +279,7 @@ app.patch('/api/briefs/:briefId', async (req, res) => {
     if (typeof title === 'string') updates.title = title;
     if (typeof status === 'string') updates.status = status;
     if (typeof raw_markdown === 'string') updates.raw_markdown = raw_markdown;
-    if (typeof version === 'number') updates.version = version;
-    // Domäne darf string oder null sein
-    if (typeof domain_id === 'string' || domain_id === null) {
-      updates.domain_id = domain_id;
-    }
+    if (typeof domain_id === 'string') updates.domain_id = domain_id;
 
     if (Object.keys(updates).length === 0) {
       return res
@@ -277,101 +314,12 @@ app.patch('/api/briefs/:briefId', async (req, res) => {
   }
 });
 
-// ---- Sheets: Detail (ohne Fragen) ----
-app.get('/api/sheets/:sheetId', async (req, res) => {
-  const { sheetId } = req.params;
-
-  try {
-    const { data, error } = await supabase
-      .from('overleitung_sheets')
-      .select('id, name, theme, status, version, created_at, theme_target_description')
-      .eq('id', sheetId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Fehler in GET /api/sheets/:sheetId:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: 'Sheet nicht gefunden' });
-    }
-
-    res.json(data);
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in GET /api/sheets/:sheetId:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
-
-app.patch('/api/sheets/:sheetId', async (req, res) => {
-  const { sheetId } = req.params;
-  const { name, theme, status, version } = req.body ?? {};
-
-  try {
-    const updates: any = {};
-
-    if (typeof name === 'string') updates.name = name;
-    if (typeof theme === 'string') updates.theme = theme;
-    if (typeof status === 'string') updates.status = status;
-    if (typeof version === 'number') updates.version = version;
-
-    if (Object.keys(updates).length === 0) {
-      return res
-        .status(400)
-        .json({ error: 'Keine gültigen Felder zum Aktualisieren übergeben.' });
-    }
-
-    const { data, error } = await supabase
-      .from('overleitung_sheets')
-      .update(updates)
-      .eq('id', sheetId)
-      .select('id, name, theme, status, version, created_at, theme_target_description')
-      .single();
-
-    if (error) {
-      console.error('Fehler in PATCH /api/sheets/:sheetId:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: 'Sheet nicht gefunden' });
-    }
-
-    res.json(data);
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in PATCH /api/sheets/:sheetId:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
-
-// ---- Sheets: Liste aller Überleitungssheets ----
-app.get('/api/sheets', async (_req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('overleitung_sheets')
-      .select('id, name, theme, status, version, created_at')
-      .order('theme', { ascending: true })
-      .order('version', { ascending: false });
-
-    if (error) {
-      console.error('Fehler in GET /api/sheets:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    res.json(data ?? []);
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in GET /api/sheets:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
-
-// Brief aktualisieren (vollständig)
+// Brief aktualisieren (vollständig – inkl. Version, wenn Du es brauchst)
 app.put('/api/briefs/:briefId', async (req, res) => {
   const { briefId } = req.params;
   const payload = req.body ?? {};
 
-  delete payload.id; // Primärschlüssel nicht überschreiben
+  delete (payload as any).id; // Primärschlüssel nicht überschreiben
 
   try {
     const { data, error } = await supabase
@@ -398,19 +346,221 @@ app.put('/api/briefs/:briefId', async (req, res) => {
   }
 });
 
+// Brief-Detail
+app.get('/api/briefs/:briefId', async (req, res) => {
+  const { briefId } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('briefs')
+      .select(
+        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at',
+      )
+      .eq('id', briefId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in GET /api/briefs/:briefId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Brief nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/briefs/:briefId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Brief -> aktive Sheets
+app.get('/api/briefs/:briefId/sheets', async (req, res) => {
+  const { briefId } = req.params;
+
+  try {
+    const { data: brief, error: briefErr } = await supabase
+      .from('briefs')
+      .select('id')
+      .eq('id', briefId)
+      .maybeSingle();
+
+    if (briefErr) {
+      console.error(
+        'Fehler beim Laden des Briefs in /briefs/:briefId/sheets:',
+        briefErr,
+      );
+      return res.status(500).json({ error: briefErr.message });
+    }
+    if (!brief) {
+      return res.status(404).json({ error: 'Brief nicht gefunden' });
+    }
+
+    const { data: sheets, error: sheetsErr } = await supabase
+      .from('overleitung_sheets')
+      .select('id, name, theme, status, version, created_at')
+      .eq('status', 'active')
+      .order('theme', { ascending: true })
+      .order('version', { ascending: false });
+
+    if (sheetsErr) {
+      console.error(
+        'Fehler beim Laden der Sheets in /briefs/:briefId/sheets:',
+        sheetsErr,
+      );
+      return res.status(500).json({ error: sheetsErr.message });
+    }
+
+    res.json({
+      brief_id: briefId,
+      sheets: sheets ?? [],
+    });
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/briefs/:briefId/sheets:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Brief löschen
+app.delete('/api/briefs/:briefId', async (req, res) => {
+  const { briefId } = req.params;
+
+  try {
+    const { error } = await supabase
+      .from('briefs')
+      .delete()
+      .eq('id', briefId);
+
+    if (error) {
+      console.error('Fehler in DELETE /api/briefs/:briefId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    // 204: erfolgreich, kein Body
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in DELETE /api/briefs/:briefId:', e);
+    return res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+//
+// ---- SHEETS (Metadaten) ----------------------------------------------
+//
+
+// Sheets: Detail (ohne Fragen)
+app.get('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+
+  try {
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .select(
+        'id, name, theme, status, version, created_at, theme_target_description',
+      )
+      .eq('id', sheetId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Fehler in GET /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/sheets/:sheetId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+app.patch('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+  const { name, theme, status, version, theme_target_description } =
+    req.body ?? {};
+
+  try {
+    const updates: any = {};
+
+    if (typeof name === 'string') updates.name = name;
+    if (typeof theme === 'string') updates.theme = theme;
+    if (typeof status === 'string') updates.status = status;
+    if (typeof version === 'number') updates.version = version;
+    if (typeof theme_target_description === 'string') {
+      updates.theme_target_description = theme_target_description;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res
+        .status(400)
+        .json({ error: 'Keine gültigen Felder zum Aktualisieren übergeben.' });
+    }
+
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .update(updates)
+      .eq('id', sheetId)
+      .select(
+        'id, name, theme, status, version, created_at, theme_target_description',
+      )
+      .single();
+
+    if (error) {
+      console.error('Fehler in PATCH /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    if (!data) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    res.json(data);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in PATCH /api/sheets/:sheetId:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+// Sheets: Liste aller Überleitungssheets
+app.get('/api/sheets', async (_req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('overleitung_sheets')
+      .select('id, name, theme, status, version, created_at')
+      .order('theme', { ascending: true })
+      .order('version', { ascending: false });
+
+    if (error) {
+      console.error('Fehler in GET /api/sheets:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    res.json(data ?? []);
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in GET /api/sheets:', e);
+    res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
 // Sheet aktualisieren (vollständig)
 app.put('/api/sheets/:sheetId', async (req, res) => {
   const { sheetId } = req.params;
   const payload = req.body ?? {};
 
-  delete payload.id;
+  delete (payload as any).id;
 
   try {
     const { data, error } = await supabase
       .from('overleitung_sheets')
       .update(payload)
       .eq('id', sheetId)
-      .select('id, name, theme, status, version, created_at, theme_target_description')
+      .select(
+        'id, name, theme, status, version, created_at, theme_target_description',
+      )
       .maybeSingle();
 
     if (error) {
@@ -428,9 +578,31 @@ app.put('/api/sheets/:sheetId', async (req, res) => {
   }
 });
 
-// ----------------------------------------
-// Sheet-Questions (NEU)
-// ----------------------------------------
+// Sheet löschen
+app.delete('/api/sheets/:sheetId', async (req, res) => {
+  const { sheetId } = req.params;
+
+  try {
+    const { error } = await supabase
+      .from('overleitung_sheets')
+      .delete()
+      .eq('id', sheetId);
+
+    if (error) {
+      console.error('Fehler in DELETE /api/sheets/:sheetId:', error);
+      return res.status(500).json({ error: error.message });
+    }
+
+    return res.status(204).send();
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in DELETE /api/sheets/:sheetId:', e);
+    return res.status(500).json({ error: e.message ?? 'Unknown error' });
+  }
+});
+
+//
+// ---- SHEET-QUESTIONS -------------------------------------------------
+//
 
 // Alle Fragen eines Sheets laden
 app.get('/api/sheets/:sheetId/questions', async (req, res) => {
@@ -585,80 +757,9 @@ app.put('/api/sheets/:sheetId/questions', async (req, res) => {
   }
 });
 
-// ---- Briefs ----
-app.get('/api/briefs/:briefId', async (req, res) => {
-  const { briefId } = req.params;
-
-  try {
-    const { data, error } = await supabase
-      .from('briefs')
-      .select(
-        'id, title, domain_id, status, version, raw_markdown, created_at, updated_at',
-      )
-      .eq('id', briefId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Fehler in GET /api/briefs/:briefId:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    if (!data) {
-      return res.status(404).json({ error: 'Brief nicht gefunden' });
-    }
-
-    res.json(data);
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in GET /api/briefs/:briefId:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
-
-app.get('/api/briefs/:briefId/sheets', async (req, res) => {
-  const { briefId } = req.params;
-
-  try {
-    const { data: brief, error: briefErr } = await supabase
-      .from('briefs')
-      .select('id')
-      .eq('id', briefId)
-      .maybeSingle();
-
-    if (briefErr) {
-      console.error(
-        'Fehler beim Laden des Briefs in /briefs/:briefId/sheets:',
-        briefErr,
-      );
-      return res.status(500).json({ error: briefErr.message });
-    }
-    if (!brief) {
-      return res.status(404).json({ error: 'Brief nicht gefunden' });
-    }
-
-    const { data: sheets, error: sheetsErr } = await supabase
-      .from('overleitung_sheets')
-      .select('id, name, theme, status, version, created_at')
-      .eq('status', 'active')
-      .order('theme', { ascending: true })
-      .order('version', { ascending: false });
-
-    if (sheetsErr) {
-      console.error(
-        'Fehler beim Laden der Sheets in /briefs/:briefId/sheets:',
-        sheetsErr,
-      );
-      return res.status(500).json({ error: sheetsErr.message });
-    }
-
-    res.json({
-      brief_id: briefId,
-      sheets: sheets ?? [],
-    });
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in GET /api/briefs/:briefId/sheets:', e);
-    res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
+//
+// ---- SCORECARD / EVALUATION -----------------------------------------
+//
 
 app.get(
   '/api/briefs/:briefId/sheets/:sheetId/scorecard-latest',
@@ -674,8 +775,8 @@ app.get(
         .limit(1)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
-        // no rows
+      if (error && (error as any).code !== 'PGRST116') {
+        // "no rows" ist ok, sonst Fehler
         throw error;
       }
 
@@ -707,7 +808,9 @@ app.post(
   },
 );
 
-// ---- Interviews ----
+//
+// ---- INTERVIEWS ------------------------------------------------------
+//
 
 app.post('/api/interviews/start-for-user', async (req, res) => {
   try {
@@ -797,7 +900,9 @@ app.post('/api/interviews/:id/evaluate', async (req, res) => {
   }
 });
 
-// ---- Upload / Ingest ----
+//
+// ---- UPLOAD / INGEST -------------------------------------------------
+//
 
 app.post('/api/ingest/upload', upload.single('file'), async (req, res) => {
   try {
@@ -1145,52 +1250,6 @@ app.post('/api/ingest/uploadjson', async (req, res) => {
       error: 'internal',
       message: e?.message ?? 'Unbekannter Fehler',
     });
-  }
-});
-
-
-// Brief löschen
-app.delete('/api/briefs/:briefId', async (req, res) => {
-  const { briefId } = req.params;
-
-  try {
-    const { error } = await supabase
-      .from('briefs')
-      .delete()
-      .eq('id', briefId);
-
-    if (error) {
-      console.error('Fehler in DELETE /api/briefs/:briefId:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    // 204: erfolgreich, kein Body
-    return res.status(204).send();
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in DELETE /api/briefs/:briefId:', e);
-    return res.status(500).json({ error: e.message ?? 'Unknown error' });
-  }
-});
-
-// Sheet löschen
-app.delete('/api/sheets/:sheetId', async (req, res) => {
-  const { sheetId } = req.params;
-
-  try {
-    const { error } = await supabase
-      .from('overleitung_sheets')
-      .delete()
-      .eq('id', sheetId);
-
-    if (error) {
-      console.error('Fehler in DELETE /api/sheets/:sheetId:', error);
-      return res.status(500).json({ error: error.message });
-    }
-
-    return res.status(204).send();
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in DELETE /api/sheets/:sheetId:', e);
-    return res.status(500).json({ error: e.message ?? 'Unknown error' });
   }
 });
 
