@@ -67,6 +67,7 @@ app.post('/api/flowise/chat', async (req, res) => {
   try {
     const { message, text, history, user, userId, username } = req.body ?? {};
 
+    // 1) Frage bestimmen
     const questionRaw =
       (typeof message === 'string' && message.trim().length > 0 && message) ||
       (typeof text === 'string' && text.trim().length > 0 && text) ||
@@ -86,34 +87,53 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
+    const question = questionRaw.trim();
+    const userIdentifier = user ?? userId ?? username ?? null;
 
-    if (typeof message !== 'string' || message.trim().length === 0) {
-      return res.status(400).json({
-        error: 'bad_request',
-        message: 'Feld "message" (string) wird benötigt.',
-      });
+    // 2) History in Flowise-Format bringen:
+    //    { role: "userMessage" | "apiMessage", content: string }
+    type FlowiseHistoryItem = { role: 'userMessage' | 'apiMessage'; content: string };
+
+    let historyForFlowise: FlowiseHistoryItem[] = [];
+
+    if (Array.isArray(history)) {
+      historyForFlowise = history
+        .map((h: any): FlowiseHistoryItem | null => {
+          if (!h || typeof h.content !== 'string') return null;
+
+          const rawRole = h.role;
+
+          let role: 'userMessage' | 'apiMessage';
+
+          if (rawRole === 'user' || rawRole === 'userMessage') {
+            role = 'userMessage';
+          } else {
+            // alles andere (assistant, system, apiMessage, ...) => apiMessage
+            role = 'apiMessage';
+          }
+
+          return { role, content: h.content };
+        })
+        .filter((x: FlowiseHistoryItem | null): x is FlowiseHistoryItem => x !== null);
     }
 
-    const endpoint = `${FLOWISE_TARGET.replace(
+    const flowiseUrl = `${FLOWISE_TARGET.replace(
       /\/$/,
       '',
     )}/api/v1/prediction/${FLOWISE_CHATFLOW_ID}`;
 
-    console.log('[FLOWISE_CHAT] Request →', endpoint, { user });
-
-
-    const question = questionRaw.trim();
-    const userIdentifier = user ?? userId ?? username ?? null;
-
-    // Request an Flowise: Standard-Prediction-Endpoint
-    const flowiseUrl = `${FLOWISE_TARGET}/api/v1/prediction/${FLOWISE_CHATFLOW_ID}`;
+    console.log('[FLOWISE_CHAT] Request →', flowiseUrl, {
+      user: userIdentifier,
+      question,
+      historyLength: historyForFlowise.length,
+    });
 
     const fwRes = await fetch(flowiseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question,
-        history: Array.isArray(history) ? history : [],
+        history: historyForFlowise,
         overrideConfig: userIdentifier ? { user: userIdentifier } : {},
       }),
     });
@@ -121,8 +141,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     const textBody = await fwRes.text();
 
     if (!fwRes.ok) {
-      const txt = await fwRes.text().catch(() => '');
-      console.error('Flowise-Fehler:', fwRes.status, txt);
+      console.error('Flowise-Fehler:', fwRes.status, textBody);
       return res.status(502).json({
         error: 'flowise_error',
         message: `Flowise antwortete mit Status ${fwRes.status}`,
@@ -130,38 +149,26 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-
-        let parsed: any;
+    let parsed: any;
     try {
       parsed = JSON.parse(textBody);
     } catch {
       parsed = { text: textBody };
     }
 
-    const answer =
-      parsed.text ??
-      parsed.answer ??
-      parsed.result ??
+    const answerText =
+      (typeof parsed.text === 'string' && parsed.text) ||
+      (typeof parsed.answer === 'string' && parsed.answer) ||
+      (typeof parsed.output === 'string' && parsed.output) ||
+      (typeof parsed.message === 'string' && parsed.message) ||
       (typeof parsed === 'string' ? parsed : JSON.stringify(parsed));
 
-    console.log('[FLOWISE_CHAT] OK');
+    console.log('[FLOWISE_CHAT] OK, Antwortlänge:', answerText.length);
 
-
-    const data: any = await fwRes.json().catch(() => ({}));
-
-    // Robust Antwortfeld bestimmen
-    const answerText =
-      (typeof data.text === 'string' && data.text) ||
-      (typeof data.answer === 'string' && data.answer) ||
-      (typeof data.output === 'string' && data.output) ||
-      (typeof data.message === 'string' && data.message) ||
-      JSON.stringify(data);
-
-    // Möglichst kompatibel zum Frontend: answer UND message zurückgeben
     return res.json({
       answer: answerText,
       message: answerText,
-      raw: data,
+      raw: parsed,
     });
   } catch (e: any) {
     console.error('Unerwarteter Fehler in POST /api/flowise/chat:', e);
