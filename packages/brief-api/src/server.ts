@@ -86,6 +86,93 @@ app.post('/api/flowise/chat', async (req, res) => {
     const question = questionRaw.trim();
     const userIdentifier = user ?? userId ?? username ?? null;
 
+    // --------------------------------------------------
+    // NEU: Benutzer- und Interview-Check vor Flowise-Call
+    // --------------------------------------------------
+    if (!userIdentifier || typeof userIdentifier !== 'string') {
+      // Kein sinnvoller Benutzername → klarer Hinweis
+      return res.json({
+        answer:
+          'Es konnte kein gültiger Benutzername ermittelt werden. ' +
+          'Bitte tragen Sie oben einen gültigen Benutzernamen ein oder starten Sie den Chat direkt aus LearnWorlds.',
+        raw: '',
+      });
+    }
+
+    console.log('[FLOWISE_CHAT] userIdentifier =', userIdentifier);
+
+    // 1) User in Tabelle "users" suchen
+    const { data: userRow, error: userErr } = await supabase
+      .from('users')
+      .select('id, username')
+      .eq('username', userIdentifier)
+      .maybeSingle();
+
+    if (userErr) {
+      console.error('[FLOWISE_CHAT] Fehler beim User-Lookup:', userErr);
+      return res.status(500).json({
+        error: 'user_lookup_failed',
+        message:
+          'Fehler bei der Benutzerprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!userRow) {
+      // Benutzername existiert nicht in users → kein Zugang
+      return res.json({
+        answer:
+          `Für den Benutzernamen "${userIdentifier}" ist kein Zugang zum Interview verfügbar. ` +
+          'Bitte prüfen Sie Ihre Kurszuordnung oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    const userDbId = userRow.id as string;
+    console.log('[FLOWISE_CHAT] gefundener User id =', userDbId);
+
+    // 2) Prüfen, ob Interviews für diesen User existieren
+    const { data: interviewRow, error: intErr } = await supabase
+      .from('interviews')
+      .select('id, status, created_at')
+      .eq('user_id', userDbId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (intErr) {
+      console.error(
+        '[FLOWISE_CHAT] Fehler beim Interview-Lookup für User',
+        userDbId,
+        intErr,
+      );
+      return res.status(500).json({
+        error: 'interview_lookup_failed',
+        message:
+          'Fehler bei der Interviewprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!interviewRow) {
+      // User existiert, aber hat kein Interview
+      return res.json({
+        answer:
+          'Für diesen Benutzer ist derzeit kein Interview hinterlegt. ' +
+          'Bitte starten Sie zunächst ein Interview im Editor oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    console.log(
+      '[FLOWISE_CHAT] Interview gefunden:',
+      interviewRow.id,
+      'Status =',
+      interviewRow.status,
+    );
+
+    // --------------------------------------------------
+    // AB HIER: Dein bisheriger Flowise-Proxy unverändert
+    // --------------------------------------------------
+
     // --- History → Flowise-Format ---------------------------
     const rawHistory = Array.isArray(history) ? history : [];
 
@@ -161,56 +248,57 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     // ---------------------------------------------
-    // Antwort aus Flowise parsen – HTTP-Agent zuerst
+    // Antwort aus Flowise parsen – auf LLM-Frage
     // ---------------------------------------------
     let answerText: string | undefined;
 
     try {
       const parsed: any = JSON.parse(textBody);
 
+      // 1. Klassischer Chatflow: { question, text, answer, ... }
       if (parsed && typeof parsed === 'object') {
-        // 1. HTTP-Agent-Fall: data.responseBody.{ llm_question | question }
-        let rb: any = parsed.data?.responseBody;
+        if (typeof parsed.question === 'string') {
+          answerText = parsed.question;
+        } else if (typeof parsed.text === 'string') {
+          answerText = parsed.text;
+        } else if (typeof parsed.answer === 'string') {
+          answerText = parsed.answer;
+        } else if (typeof parsed.message === 'string') {
+          answerText = parsed.message;
+        } else if (typeof parsed.output === 'string') {
+          answerText = parsed.output;
+        }
 
-        if (typeof rb === 'string') {
-          try {
-            rb = JSON.parse(rb);
-          } catch {
-            // dann bleibt rb ein String
+        // 2. HTTP-Agent-Fall: Struktur mit nodeId / nodeLabel / data / responseBody
+        if (!answerText && parsed.data && parsed.data.responseBody) {
+          let rb: any = parsed.data.responseBody;
+
+          // responseBody ist häufig wiederum ein JSON-String
+          if (typeof rb === 'string') {
+            try {
+              rb = JSON.parse(rb);
+            } catch {
+              // ignorieren, dann bleibt rb String
+            }
+          }
+
+          if (rb && typeof rb === 'object') {
+            if (typeof rb.llm_question === 'string') {
+              answerText = rb.llm_question;
+            } else if (typeof rb.question === 'string') {
+              answerText = rb.question;
+            }
           }
         }
 
-        if (rb && typeof rb === 'object') {
-          if (typeof rb.llm_question === 'string') {
-            answerText = rb.llm_question;
-          } else if (typeof rb.question === 'string') {
-            answerText = rb.question;
-          }
-        }
-
-        // 2. Normaler Chatflow: klassische Felder
+        // 3. Fallback: technische Felder wegwerfen und restliches JSON zeigen
         if (!answerText) {
-          if (typeof parsed.answer === 'string') {
-            answerText = parsed.answer;
-          } else if (typeof parsed.text === 'string') {
-            answerText = parsed.text;
-          } else if (typeof parsed.message === 'string') {
-            answerText = parsed.message;
-          } else if (typeof parsed.output === 'string') {
-            answerText = parsed.output;
-          } else if (typeof parsed.question === 'string') {
-            // ACHTUNG: erst ganz zum Schluss, weil das häufig die Eingabefrage ist
-            answerText = parsed.question;
-          } else {
-            const clone: any = { ...parsed };
-            delete clone.status;
-            delete clone.success;
-            delete clone.stack;
-            answerText = JSON.stringify(clone);
-          }
+          const clone: any = { ...parsed };
+          delete clone.status;
+          delete clone.success;
+          delete clone.stack;
+          answerText = JSON.stringify(clone);
         }
-      } else if (typeof parsed === 'string') {
-        answerText = parsed;
       }
     } catch (err) {
       console.warn(
