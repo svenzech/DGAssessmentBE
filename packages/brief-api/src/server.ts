@@ -230,7 +230,7 @@ app.post('/api/flowise/chat', async (req, res) => {
           // In Flowise kannst Du sie als {{$vars.INTERVIEW_ID}} verwenden,
           // z. B. für einen HTTP-Header x-interview-id.
           vars: {
-            INTERVIEW_ID: 'tsdsdsest', //interviewId, 
+            INTERVIEW_ID: interviewId, 
           },
         },
       }),
