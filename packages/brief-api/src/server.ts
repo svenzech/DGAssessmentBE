@@ -127,10 +127,12 @@ app.post('/api/flowise/chat', async (req, res) => {
     const userDbId = userRow.id as string;
     console.log('[FLOWISE_CHAT] gefundener User id =', userDbId);
 
+    // NEU: nur Interviews im Status "started", neueste zuerst
     const { data: interviewRow, error: intErr } = await supabase
       .from('interviews')
       .select('id, status, created_at')
       .eq('user_id', userDbId)
+      .eq('status', 'started')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -149,9 +151,10 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     if (!interviewRow) {
+      // Es gibt Interviews, aber keins im Status "started" -> für den Chat als „kein Interview aktiv“
       return res.json({
         answer:
-          'Für diesen Benutzer ist derzeit kein Interview hinterlegt. ' +
+          'Für diesen Benutzer ist derzeit kein aktives Interview im Status "started" hinterlegt. ' +
           'Bitte starten Sie zunächst ein Interview im Editor oder wenden Sie sich an die Kursbetreuung.',
         raw: '',
       });
@@ -163,6 +166,8 @@ app.post('/api/flowise/chat', async (req, res) => {
       'Status =',
       interviewRow.status,
     );
+
+    const interviewId = interviewRow.id as string;
 
     // ------------------------------
     // 2) Flowise-Aufruf
@@ -209,22 +214,26 @@ app.post('/api/flowise/chat', async (req, res) => {
       user: userIdentifier,
       question,
       historyLen: normalizedHistory.length,
+      interviewId,
     });
 
-const fwRes = await fetch(flowiseUrl, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    question,
-    history: normalizedHistory,
-    overrideConfig: {
-      user: userIdentifier,
-      vars: {
-        interview_id: '0680e5f3-9e69-4128-8400-4c7da4cd11e3', // interviewRow.id,   // <- hier kommt deine Interview-ID rein
-      },
-    },
-  }),
-});
+    const fwRes = await fetch(flowiseUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question,
+        history: normalizedHistory,
+        overrideConfig: {
+          user: userIdentifier,
+          // Hier wird die Interview-ID nach Flowise durchgereicht.
+          // In Flowise kannst Du sie als {{$vars.INTERVIEW_ID}} verwenden,
+          // z. B. für einen HTTP-Header x-interview-id.
+          vars: {
+            INTERVIEW_ID: interviewId,
+          },
+        },
+      }),
+    });
 
     const textBody = await fwRes.text();
 
@@ -253,84 +262,87 @@ const fwRes = await fetch(flowiseUrl, {
     try {
       let outer: any = JSON.parse(textBody);
 
-    if (outer && typeof outer === 'object' && !Array.isArray(outer)) {
-      const inner = outer as any;
-      meta = inner;
+      if (outer && typeof outer === 'object' && !Array.isArray(outer)) {
+        const inner = outer as any;
+        meta = inner;
 
-      const parts: string[] = [];
+        const parts: string[] = [];
 
-      // kleine Hilfsfunktion, damit wir nie exakt die User-Frage spiegeln
-      const pick = (val?: unknown): string | null => {
-        if (typeof val !== 'string') return null;
-        const t = val.trim();
-        if (!t) return null;
-        if (t === question.trim()) return null; // kein bloßes Echo
-        return t;
-      };
+        // kleine Hilfsfunktion, damit wir nie exakt die User-Frage spiegeln
+        const pick = (val?: unknown): string | null => {
+          if (typeof val !== 'string') return null;
+          const t = val.trim();
+          if (!t) return null;
+          if (t === question.trim()) return null; // kein bloßes Echo
+          return t;
+        };
 
-      // 1) Direktfelder auf oberster Ebene
-      const directAnswer =
-        pick(inner.answer) ??
-        pick(inner.text) ??
-        pick(inner.message) ??
-        pick(inner.output) ??
-        pick(inner.question) ??
-        pick(inner.llm_question);
+        // 1) Direktfelder auf oberster Ebene
+        const directAnswer =
+          pick(inner.answer) ??
+          pick(inner.text) ??
+          pick(inner.message) ??
+          pick(inner.output) ??
+          pick(inner.question) ??
+          pick(inner.llm_question);
 
-      if (directAnswer) {
-        parts.push(directAnswer);
-      }
+        if (directAnswer) {
+          parts.push(directAnswer);
+        }
 
-      // 2) HTTP-Agent-Fall: data.responseBody auswerten
-      if (parts.length === 0 && inner.data && inner.data.responseBody) {
-        let rb: any = inner.data.responseBody;
+        // 2) HTTP-Agent-Fall: data.responseBody auswerten
+        if (parts.length === 0 && inner.data && inner.data.responseBody) {
+          let rb: any = inner.data.responseBody;
 
-        if (typeof rb === 'string') {
-          const trimmed = rb.trim();
-          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-            try {
-              rb = JSON.parse(trimmed);
-            } catch {
-              // bleibt String
+          if (typeof rb === 'string') {
+            const trimmed = rb.trim();
+            if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+              try {
+                rb = JSON.parse(trimmed);
+              } catch {
+                // bleibt String
+              }
             }
           }
-        }
 
-        if (rb && typeof rb === 'object' && !Array.isArray(rb)) {
-          const rbi = rb as any;
+          if (rb && typeof rb === 'object' && !Array.isArray(rb)) {
+            const rbi = rb as any;
 
-          const innerAnswer =
-            pick(rbi.answer) ??
-            pick(rbi.llm_question) ??
-            pick(rbi.question) ??
-            pick(rbi.text) ??
-            pick(rbi.message) ??
-            pick(rbi.output);
+            const innerAnswer =
+              pick(rbi.answer) ??
+              pick(rbi.llm_question) ??
+              pick(rbi.question) ??
+              pick(rbi.text) ??
+              pick(rbi.message) ??
+              pick(rbi.output);
 
-          if (innerAnswer) {
-            parts.push(innerAnswer);
+            if (innerAnswer) {
+              parts.push(innerAnswer);
+            }
+          }
+
+          // falls responseBody nur ein String ist (nicht json), aber sinnvoll:
+          if (parts.length === 0 && typeof rb === 'string') {
+            const v = pick(rb);
+            if (v) parts.push(v);
           }
         }
 
-        // falls responseBody nur ein String ist (nicht json), aber sinnvoll:
-        if (parts.length === 0 && typeof rb === 'string') {
-          const v = pick(rb);
+        // 3) letzter Fallback: inner.text, falls noch nichts da und nicht identisch zur Frage
+        if (parts.length === 0) {
+          const v = pick(inner.text);
           if (v) parts.push(v);
         }
-      }
 
-      // 3) letzter Fallback: inner.text, falls noch nichts da und nicht identisch zur Frage
-      if (parts.length === 0) {
-        const v = pick(inner.text);
-        if (v) parts.push(v);
-      }
-
-      if (parts.length > 0) {
-        cleanedAnswer = parts.join('\n\n');
-      }
+        if (parts.length > 0) {
+          cleanedAnswer = parts.join('\n\n');
+        }
       }
     } catch (err) {
-      console.warn('[FLOWISE_CHAT] Konnte Antwort nicht parsen, nutze raw.', err);
+      console.warn(
+        '[FLOWISE_CHAT] Konnte Antwort nicht parsen, nutze raw.',
+        err,
+      );
     }
 
     return res.json({
