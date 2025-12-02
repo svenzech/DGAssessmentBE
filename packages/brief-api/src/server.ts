@@ -211,15 +211,20 @@ app.post('/api/flowise/chat', async (req, res) => {
       historyLen: normalizedHistory.length,
     });
 
-    const fwRes = await fetch(flowiseUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question,
-        history: normalizedHistory,
-        overrideConfig: { user: userIdentifier },
-      }),
-    });
+const fwRes = await fetch(flowiseUrl, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    question,
+    history: normalizedHistory,
+    overrideConfig: {
+      user: userIdentifier,
+      vars: {
+        INTERVIEW_ID: '0680e5f3-9e69-4128-8400-4c7da4cd11e3', // interviewRow.id,   // <- hier kommt deine Interview-ID rein
+      },
+    },
+  }),
+});
 
     const textBody = await fwRes.text();
 
