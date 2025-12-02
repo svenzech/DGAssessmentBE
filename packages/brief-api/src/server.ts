@@ -49,6 +49,14 @@ const FALLBACK_DOMAIN_ID =
   process.env.FALLBACK_DOMAIN_ID ?? '00000000-0000-0000-0000-000000000000';
 console.info('FALLBACK_DOMAIN_ID ist (' + FALLBACK_DOMAIN_ID + ').');
 
+// Middleware – CORS global erlauben + JSON Body Parser
+app.use(
+  cors({
+    origin: true, // spiegelt den Origin zurück, egal welcher
+  }),
+);
+app.use(express.json({ limit: '3mb' }));
+
 
 // ---- Flowise Chat ----
 // Einfache Chat-Proxy-Route für das Flowise-Chatflow
@@ -173,9 +181,6 @@ const upload = multer({
   },
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '3mb' }));
 
 // Request-Logger (nur zu Debugzwecken)
 app.use((req, _res, next) => {
