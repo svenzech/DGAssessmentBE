@@ -248,65 +248,81 @@ app.post('/api/flowise/chat', async (req, res) => {
     try {
       let outer: any = JSON.parse(textBody);
 
-      // a) Flowise gibt oft ein Array von Messages zurück
-      if (Array.isArray(outer) && outer.length > 0) {
-        const last = outer[outer.length - 1];
-        if (last && typeof last.text === 'string') {
-          outer = last.text;
-        }
+    if (outer && typeof outer === 'object' && !Array.isArray(outer)) {
+      const inner = outer as any;
+      meta = inner;
+
+      const parts: string[] = [];
+
+      // kleine Hilfsfunktion, damit wir nie exakt die User-Frage spiegeln
+      const pick = (val?: unknown): string | null => {
+        if (typeof val !== 'string') return null;
+        const t = val.trim();
+        if (!t) return null;
+        if (t === question.trim()) return null; // kein bloßes Echo
+        return t;
+      };
+
+      // 1) Direktfelder auf oberster Ebene
+      const directAnswer =
+        pick(inner.answer) ??
+        pick(inner.text) ??
+        pick(inner.message) ??
+        pick(inner.output) ??
+        pick(inner.question) ??
+        pick(inner.llm_question);
+
+      if (directAnswer) {
+        parts.push(directAnswer);
       }
 
-      // b) falls das jetzt ein JSON-String ist → erneut parsen
-      if (typeof outer === 'string') {
-        const trimmed = outer.trim();
-        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-          try {
-            outer = JSON.parse(trimmed);
-          } catch {
-            // dann bleibt es ein String
+      // 2) HTTP-Agent-Fall: data.responseBody auswerten
+      if (parts.length === 0 && inner.data && inner.data.responseBody) {
+        let rb: any = inner.data.responseBody;
+
+        if (typeof rb === 'string') {
+          const trimmed = rb.trim();
+          if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+            try {
+              rb = JSON.parse(trimmed);
+            } catch {
+              // bleibt String
+            }
           }
         }
+
+        if (rb && typeof rb === 'object' && !Array.isArray(rb)) {
+          const rbi = rb as any;
+
+          const innerAnswer =
+            pick(rbi.answer) ??
+            pick(rbi.llm_question) ??
+            pick(rbi.question) ??
+            pick(rbi.text) ??
+            pick(rbi.message) ??
+            pick(rbi.output);
+
+          if (innerAnswer) {
+            parts.push(innerAnswer);
+          }
+        }
+
+        // falls responseBody nur ein String ist (nicht json), aber sinnvoll:
+        if (parts.length === 0 && typeof rb === 'string') {
+          const v = pick(rb);
+          if (v) parts.push(v);
+        }
       }
 
-      // c) gewünschte Logik auf innerem Objekt
-      if (outer && typeof outer === 'object' && !Array.isArray(outer)) {
-        const inner = outer as any;
-        meta = inner;
-        const parts: string[] = [];
+      // 3) letzter Fallback: inner.text, falls noch nichts da und nicht identisch zur Frage
+      if (parts.length === 0) {
+        const v = pick(inner.text);
+        if (v) parts.push(v);
+      }
 
-        // 1) answer
-        if (typeof inner.answer === 'string' && inner.answer.trim().length > 0) {
-          parts.push(inner.answer.trim());
-        }
-
-        // 2) question oder llm_question
-        const qVal =
-          (typeof inner.question === 'string' &&
-          inner.question.trim().length > 0
-            ? inner.question.trim()
-            : null) ??
-          (typeof inner.llm_question === 'string' &&
-          inner.llm_question.trim().length > 0
-            ? inner.llm_question.trim()
-            : null);
-
-        if (qVal) {
-          parts.push(qVal);
-        }
-
-        // 3) text-Fallback nur, wenn nicht identisch zur Nutzereingabe
-        if (
-          parts.length === 0 &&
-          typeof inner.text === 'string' &&
-          inner.text.trim().length > 0 &&
-          inner.text.trim() !== question.trim()
-        ) {
-          parts.push(inner.text.trim());
-        }
-
-        if (parts.length > 0) {
-          cleanedAnswer = parts.join('\n\n');
-        }
+      if (parts.length > 0) {
+        cleanedAnswer = parts.join('\n\n');
+      }
       }
     } catch (err) {
       console.warn('[FLOWISE_CHAT] Konnte Antwort nicht parsen, nutze raw.', err);
