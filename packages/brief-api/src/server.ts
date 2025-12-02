@@ -67,7 +67,6 @@ app.post('/api/flowise/chat', async (req, res) => {
   try {
     const { message, text, history, user, userId, username } = req.body ?? {};
 
-    // 1) Frage bestimmen
     const questionRaw =
       (typeof message === 'string' && message.trim().length > 0 && message) ||
       (typeof text === 'string' && text.trim().length > 0 && text) ||
@@ -90,33 +89,6 @@ app.post('/api/flowise/chat', async (req, res) => {
     const question = questionRaw.trim();
     const userIdentifier = user ?? userId ?? username ?? null;
 
-    // 2) History in Flowise-Format bringen:
-    //    { role: "userMessage" | "apiMessage", content: string }
-    type FlowiseHistoryItem = { role: 'userMessage' | 'apiMessage'; content: string };
-
-    let historyForFlowise: FlowiseHistoryItem[] = [];
-
-    if (Array.isArray(history)) {
-      historyForFlowise = history
-        .map((h: any): FlowiseHistoryItem | null => {
-          if (!h || typeof h.content !== 'string') return null;
-
-          const rawRole = h.role;
-
-          let role: 'userMessage' | 'apiMessage';
-
-          if (rawRole === 'user' || rawRole === 'userMessage') {
-            role = 'userMessage';
-          } else {
-            // alles andere (assistant, system, apiMessage, ...) => apiMessage
-            role = 'apiMessage';
-          }
-
-          return { role, content: h.content };
-        })
-        .filter((x: FlowiseHistoryItem | null): x is FlowiseHistoryItem => x !== null);
-    }
-
     const flowiseUrl = `${FLOWISE_TARGET.replace(
       /\/$/,
       '',
@@ -125,7 +97,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     console.log('[FLOWISE_CHAT] Request →', flowiseUrl, {
       user: userIdentifier,
       question,
-      historyLength: historyForFlowise.length,
+      historyLen: Array.isArray(history) ? history.length : 0,
     });
 
     const fwRes = await fetch(flowiseUrl, {
@@ -133,7 +105,7 @@ app.post('/api/flowise/chat', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question,
-        history: historyForFlowise,
+        history: Array.isArray(history) ? history : [],
         overrideConfig: userIdentifier ? { user: userIdentifier } : {},
       }),
     });
@@ -149,26 +121,47 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-    let parsed: any;
+    let answerText: string;
+
+    // Versuche, die Flowise-Antwort als JSON zu interpretieren
     try {
-      parsed = JSON.parse(textBody);
+      const parsed = JSON.parse(textBody);
+
+      if (parsed && typeof parsed === 'object') {
+        // Typischer Fall: { question: "...", status: "continue" }
+        if (typeof parsed.question === 'string') {
+          answerText = parsed.question;
+        } else if (typeof parsed.text === 'string') {
+          answerText = parsed.text;
+        } else if (typeof parsed.answer === 'string') {
+          answerText = parsed.answer;
+        } else if (typeof parsed.message === 'string') {
+          answerText = parsed.message;
+        } else if (typeof parsed.output === 'string') {
+          answerText = parsed.output;
+        } else {
+          // Fallback: status im JSON entfernen, aber NICHT per Regex im String
+          const clone: any = { ...parsed };
+          delete clone.status;
+          delete clone.success;
+          delete clone.stack;
+          answerText = JSON.stringify(clone);
+        }
+      } else if (typeof parsed === 'string') {
+        answerText = parsed;
+      } else {
+        answerText = textBody;
+      }
     } catch {
-      parsed = { text: textBody };
+      // Kein JSON → wir verwenden den Text 1:1
+      answerText = textBody;
     }
 
-    const answerText =
-      (typeof parsed.text === 'string' && parsed.text) ||
-      (typeof parsed.answer === 'string' && parsed.answer) ||
-      (typeof parsed.output === 'string' && parsed.output) ||
-      (typeof parsed.message === 'string' && parsed.message) ||
-      (typeof parsed === 'string' ? parsed : JSON.stringify(parsed));
-
-    console.log('[FLOWISE_CHAT] OK, Antwortlänge:', answerText.length);
+    console.log('[FLOWISE_CHAT] OK, Antwortlänge =', answerText.length);
 
     return res.json({
       answer: answerText,
-      message: answerText,
-      raw: parsed,
+      raw: textBody,
     });
   } catch (e: any) {
     console.error('Unerwarteter Fehler in POST /api/flowise/chat:', e);
