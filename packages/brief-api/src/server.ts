@@ -220,7 +220,7 @@ const fwRes = await fetch(flowiseUrl, {
     overrideConfig: {
       user: userIdentifier,
       vars: {
-        INTERVIEW_ID: '0680e5f3-9e69-4128-8400-4c7da4cd11e3', // interviewRow.id,   // <- hier kommt deine Interview-ID rein
+        interview_id: '0680e5f3-9e69-4128-8400-4c7da4cd11e3', // interviewRow.id,   // <- hier kommt deine Interview-ID rein
       },
     },
   }),
