@@ -61,7 +61,7 @@ export interface FindingForInterview {
   question_code: string;
   question: string;
   checkpoints: string[];
-  finding: any;
+  //finding: any;
 }
 
 export interface AnswerRecord {
@@ -223,7 +223,7 @@ async function loadFindingsForBrief(
       question_code: row.question.code,
       question: row.question.question,
       checkpoints: row.question.checkpoints || [],
-      finding: row.finding_json,
+      // finding: row.finding_json,
     });
   }
 
