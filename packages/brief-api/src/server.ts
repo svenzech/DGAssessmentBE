@@ -1177,7 +1177,7 @@ app.get(
 
       const ctx = await loadLeanInterviewContext(interviewId);
       res.json(ctx);
-      
+
     } catch (e: any) {
       console.error('Fehler in GET /api/interviews/.../context:', e);
       res.status(500).json({ error: e.message ?? 'Unknown error' });
