@@ -32,6 +32,7 @@ if (!FLOWISE_CHATFLOW_ID) {
 // ----------------------------------------
 import { startInterviewsForUser } from '../../brief-parser/src/start_interview_user';
 import { loadInterviewContext } from '../../brief-parser/src/interview_context';
+import { loadLeanInterviewContext } from '../../brief-parser/src/interview_context';
 import { saveAnswer } from '../../brief-parser/src/save_answer';
 import { evaluateInterview } from '../../brief-parser/src/evaluate_interview';
 import { evaluateBriefSheet } from '../../brief-parser/src/evaluate_brief_sheet';
@@ -1174,8 +1175,9 @@ app.get(
         });
       }
 
-      const ctx = await loadInterviewContext(interviewId);
+      const ctx = await loadLeanInterviewContext(interviewId);
       res.json(ctx);
+      
     } catch (e: any) {
       console.error('Fehler in GET /api/interviews/.../context:', e);
       res.status(500).json({ error: e.message ?? 'Unknown error' });

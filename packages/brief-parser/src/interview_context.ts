@@ -82,6 +82,35 @@ export interface InterviewContext {
   answers: AnswerRecord[];
 }
 
+// ==== "Lean" Typen für Flowise / LLM-Kontext ====
+
+export interface LeanAnswer {
+  ts: string | null;
+  user_answer: string | null;
+  llm_status: string | null;
+  question_hint: string | null;
+}
+
+export interface LeanInterviewContext {
+  interview: {
+    id: string;
+    status: string;
+    interview_type: InterviewType;
+    created_at: string;
+    completed_at: string | null;
+    scorecard_json: any | null;
+  };
+  user: { id: string };
+  domain: DomainInfo | null;
+  brief: {
+    id: string;
+    title: string | null;
+    raw_markdown: string;
+    version: number | null;
+  };
+  answers: LeanAnswer[];
+}
+
 // ==== Hilfsfunktionen zum Laden der Daten ====
 
 async function loadInterview(interviewId: string): Promise<InterviewRow> {
@@ -100,7 +129,6 @@ async function loadInterview(interviewId: string): Promise<InterviewRow> {
     throw new Error(`Kein Interview gefunden für id=${interviewId}`);
   }
 
-  // TypeScript-Hinweis: wir vertrauen hier dem DB-Schema
   return data as unknown as InterviewRow;
 }
 
@@ -131,7 +159,6 @@ async function loadDomain(domainId: string | null): Promise<DomainInfo | null> {
     .single();
 
   if (error) {
-    // Falls Domains (noch) nicht gepflegt sind, lieber null zurückgeben als alles hart abbrechen
     console.warn('Warnung: Konnte Domain nicht laden:', error.message);
     return null;
   }
@@ -143,7 +170,6 @@ async function loadDomain(domainId: string | null): Promise<DomainInfo | null> {
 async function loadFindingsForBrief(
   briefId: string,
 ): Promise<FindingForInterview[]> {
-  // Join: brief_sheet_findings -> overleitung_sheets (sheet) -> sheet_questions (question)
   const { data, error } = await sb
     .from('brief_sheet_findings')
     .select(
@@ -180,7 +206,6 @@ async function loadFindingsForBrief(
 
   for (const row of data as any[]) {
     if (!row.sheet || !row.question) {
-      // Falls die Joins mal nicht auflösen, lieber überspringen als crashen
       console.warn(
         'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
         row.id,
@@ -224,7 +249,7 @@ async function loadAnswersForInterview(
   return data as unknown as AnswerRecord[];
 }
 
-// ==== Hauptfunktion: InterviewContext laden ====
+// ==== Hauptfunktion: Voller InterviewContext ====
 
 export async function loadInterviewContext(
   interviewId: string,
@@ -252,6 +277,52 @@ export async function loadInterviewContext(
   return context;
 }
 
+// ==== Schlanke Variante für Flowise / LLM ====
+
+export async function loadLeanInterviewContext(
+  interviewId: string,
+): Promise<LeanInterviewContext> {
+  const full = await loadInterviewContext(interviewId);
+
+  const leanAnswers: LeanAnswer[] = full.answers.map((a) => {
+    const aj = a.answer_json ?? {};
+    const ts =
+      typeof aj.ts === 'string'
+        ? aj.ts
+        : (a.created_at ?? null);
+
+    return {
+      ts,
+      user_answer:
+        typeof aj.user_answer === 'string' ? aj.user_answer : null,
+      llm_status:
+        typeof aj.llm_status === 'string' ? aj.llm_status : null,
+      question_hint:
+        typeof aj.question_hint === 'string' ? aj.question_hint : null,
+    };
+  });
+
+  return {
+    interview: {
+      id: full.interview.id,
+      status: full.interview.status,
+      interview_type: full.interview.interview_type,
+      created_at: full.interview.created_at,
+      completed_at: full.interview.completed_at,
+      scorecard_json: full.interview.scorecard_json ?? null,
+    },
+    user: full.user,
+    domain: full.domain,
+    brief: {
+      id: full.brief.id,
+      title: full.brief.title,
+      raw_markdown: full.brief.raw_markdown,
+      version: full.brief.version ?? null,
+    },
+    answers: leanAnswers,
+  };
+}
+
 // ==== Optionaler CLI-Entry zum Testen ====
 
 const isDirectRun =
@@ -268,7 +339,7 @@ if (isDirectRun) {
     process.exit(1);
   }
 
-  loadInterviewContext(interviewId)
+  loadLeanInterviewContext(interviewId)
     .then((ctx) => {
       console.log(JSON.stringify(ctx, null, 2));
     })
