@@ -108,7 +108,7 @@ export interface LeanInterviewContext {
     raw_markdown: string;
     version: number | null;
   };
-  answers: LeanAnswer[];
+  // answers: LeanAnswer[];
 }
 
 // ==== Hilfsfunktionen zum Laden der Daten ====
@@ -318,8 +318,8 @@ export async function loadLeanInterviewContext(
       title: full.brief.title,
       raw_markdown: full.brief.raw_markdown,
       version: full.brief.version ?? null,
-    },
-    answers: leanAnswers,
+    } //,
+    // answers: leanAnswers,
   };
 }
 
