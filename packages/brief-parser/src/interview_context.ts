@@ -84,6 +84,32 @@ export interface InterviewContext {
 
 // ==== "Lean" Typen für Flowise / LLM-Kontext ====
 
+export interface LeanFinding {
+  id: string;
+  sheet_id: string;
+  sheet_name: string;
+  theme: string;
+  question_id: string;
+  question_code: string;
+  question: string;
+
+  status: string | null;
+  score_1_5: number | null;
+  rationale: string | null;
+  evidence: string[];        // nur die Zitate / Belege
+  open_questions: string[];  // Nachfragen an den Interviewpartner
+}
+
+export interface LeanInterviewContext {
+  brief: {
+    id: string;
+    title: string | null;
+    raw_markdown: string;
+    version: number | null;
+  };
+  findings: LeanFinding[];
+}
+
 export interface LeanAnswer {
   ts: string | null;
   user_answer: string | null;
@@ -91,26 +117,6 @@ export interface LeanAnswer {
   question_hint: string | null;
 }
 
-export interface LeanInterviewContext {
-  interview: {
-    id: string;
-    status: string;
-    interview_type: InterviewType;
-    created_at: string;
-    completed_at: string | null;
-    scorecard_json: any | null;
-  };
-  user: { id: string };
-  domain: DomainInfo | null;
-  brief: {
-    id: string;
-    title: string | null;
-    raw_markdown: string;
-    version: number | null;
-  };
-  findings: FindingForInterview[];
-  // answers: LeanAnswer[];
-}
 
 // ==== Hilfsfunktionen zum Laden der Daten ====
 
@@ -280,48 +286,99 @@ export async function loadInterviewContext(
 
 // ==== Schlanke Variante für Flowise / LLM ====
 
+async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]> {
+  const { data, error } = await sb
+    .from('brief_sheet_findings')
+    .select(
+      `
+      id,
+      brief_id,
+      sheet_id,
+      question_id,
+      finding_json,
+      sheet:overleitung_sheets (
+        id,
+        name,
+        theme
+      ),
+      question:sheet_questions (
+        id,
+        code,
+        question
+      )
+    `,
+    )
+    .eq('brief_id', briefId);
+
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  const result: LeanFinding[] = [];
+
+  for (const row of data as any[]) {
+    if (!row.sheet || !row.question) {
+      console.warn(
+        'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
+        row.id,
+      );
+      continue;
+    }
+
+    const fj = row.finding_json ?? {};
+
+    result.push({
+      id: row.id,
+      sheet_id: row.sheet.id,
+      sheet_name: row.sheet.name,
+      theme: row.sheet.theme,
+      question_id: row.question.id,
+      question_code: row.question.code,
+      question: row.question.question,
+
+      status: typeof fj.status === 'string' ? fj.status : null,
+      score_1_5:
+        typeof fj.score_1_5 === 'number' ? fj.score_1_5 : null,
+      rationale:
+        typeof fj.rationale === 'string' ? fj.rationale : null,
+      evidence: Array.isArray(fj.evidence)
+        ? fj.evidence.map((e: any) =>
+            typeof e === 'string'
+              ? e
+              : typeof e.quote === 'string'
+              ? e.quote
+              : JSON.stringify(e),
+          )
+        : [],
+      open_questions: Array.isArray(fj.open_questions)
+        ? fj.open_questions.map((q: any) => String(q))
+        : [],
+    });
+  }
+
+  return result;
+}
+
+
 export async function loadLeanInterviewContext(
   interviewId: string,
 ): Promise<LeanInterviewContext> {
-  const full = await loadInterviewContext(interviewId);
+  // 1) Interview nur, um brief_id zu bekommen
+  const interview = await loadInterview(interviewId);
 
-  const leanAnswers: LeanAnswer[] = full.answers.map((a) => {
-    const aj = a.answer_json ?? {};
-    const ts =
-      typeof aj.ts === 'string'
-        ? aj.ts
-        : (a.created_at ?? null);
-
-    return {
-      ts,
-      user_answer:
-        typeof aj.user_answer === 'string' ? aj.user_answer : null,
-      llm_status:
-        typeof aj.llm_status === 'string' ? aj.llm_status : null,
-      question_hint:
-        typeof aj.question_hint === 'string' ? aj.question_hint : null,
-    };
-  });
+  // 2) Steckbrief + Findings parallel laden
+  const [brief, findings] = await Promise.all([
+    loadBrief(interview.brief_id),
+    loadLeanFindingsForBrief(interview.brief_id),
+  ]);
 
   return {
-    interview: {
-      id: full.interview.id,
-      status: full.interview.status,
-      interview_type: full.interview.interview_type,
-      created_at: full.interview.created_at,
-      completed_at: full.interview.completed_at,
-      scorecard_json: full.interview.scorecard_json ?? null,
-    },
-    user: full.user,
-    domain: full.domain,
     brief: {
-      id: full.brief.id,
-      title: full.brief.title,
-      raw_markdown: full.brief.raw_markdown,
-      version: full.brief.version ?? null,
+      id: brief.id,
+      title: brief.title,
+      raw_markdown: brief.raw_markdown,
+      version: brief.version ?? null,
     },
-    // answers: leanAnswers,
-    findings: full.findings,
+    findings,
   };
 }
 
