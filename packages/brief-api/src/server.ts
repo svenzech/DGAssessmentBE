@@ -420,92 +420,48 @@ app.get('/api/health', (_req, res) => {
 // Kontext für einen bestimmten Benutzer (Lean-Variante)
 app.get('/api/interviews/context-for-user', async (req, res) => {
   try {
-    const userIdentifier = String(req.query.user ?? '').trim();
-
-    if (!userIdentifier) {
-      return res.status(400).json({
-        error: 'bad_request',
-        message:
-          'Query-Parameter "user" ist Pflicht (z. B. ?user=learnworlds:svz).',
-      });
+    const userIdentifier = req.query.user;
+    if (!userIdentifier || typeof userIdentifier !== 'string') {
+      return res.status(400).json({ error: 'user missing' });
     }
 
-    console.log('[INTERVIEW_CTX_FOR_USER] userIdentifier =', userIdentifier);
-
-    // 1) User lookup
-    const { data: userRow, error: userErr } = await supabase
+    // User lookup
+    const { data: userRow } = await supabase
       .from('users')
-      .select('id, username')
+      .select('id')
       .eq('username', userIdentifier)
       .maybeSingle();
 
-    if (userErr) {
-      console.error(
-        '[INTERVIEW_CTX_FOR_USER] Fehler beim User-Lookup:',
-        userErr,
-      );
-      return res.status(500).json({
-        error: 'user_lookup_failed',
-        message: 'Fehler bei der Benutzerprüfung.',
-      });
-    }
-
     if (!userRow) {
-      return res.status(404).json({
-        error: 'user_not_found',
-        message: `Kein Benutzer mit username="${userIdentifier}" gefunden.`,
-      });
+      return res.status(404).json({ error: 'user not found' });
     }
 
-    const userDbId = userRow.id as string;
+    const userId = userRow.id;
 
-    // 2) Aktives Interview im Status "started" suchen (neuester Eintrag)
-    const { data: interviewRow, error: intErr } = await supabase
+    // Aktivstes Interview holen
+    const { data: interviewRow } = await supabase
       .from('interviews')
-      .select('id, status, created_at')
-      .eq('user_id', userDbId)
+      .select('id,status')
+      .eq('user_id', userId)
       .eq('status', 'started')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (intErr) {
-      console.error(
-        '[INTERVIEW_CTX_FOR_USER] Fehler beim Interview-Lookup:',
-        intErr,
-      );
-      return res.status(500).json({
-        error: 'interview_lookup_failed',
-        message: 'Fehler beim Laden des Interviews.',
-      });
-    }
-
     if (!interviewRow) {
-      return res.status(404).json({
-        error: 'no_active_interview',
-        message:
-          'Es ist kein aktives Interview im Status "started" für diesen Benutzer vorhanden.',
-      });
+      return res.status(404).json({ error: 'no active interview' });
     }
 
-    const interviewId = interviewRow.id as string;
-
-    // 3) Lean-Kontext laden
-    const ctx = await loadLeanInterviewContext(interviewId);
+    // Lean-Kontext laden (enthält theme!)
+    const lean = await loadLeanInterviewContext(interviewRow.id);
 
     return res.json({
-      interview_id: interviewId,
-      ...ctx,
+      brief: lean.brief,
+      interview: lean.interview,   // <<–– das ist wichtig!
     });
-  } catch (e: any) {
-    console.error(
-      '[INTERVIEW_CTX_FOR_USER] Unerwarteter Fehler:',
-      e?.message ?? e,
-    );
-    return res.status(500).json({
-      error: 'internal',
-      message: e?.message ?? 'Unbekannter Fehler',
-    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'internal_error' });
   }
 });
 
@@ -1302,7 +1258,6 @@ app.get(
 
       const ctx = await loadLeanInterviewContext(interviewId);
       res.json(ctx);
-
     } catch (e: any) {
       console.error('Fehler in GET /api/interviews/.../context:', e);
       res.status(500).json({ error: e.message ?? 'Unknown error' });
