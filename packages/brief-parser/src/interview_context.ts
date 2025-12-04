@@ -102,7 +102,7 @@ export interface LeanInterviewEntry {
 export interface LeanInterviewContext {
   brief: {
     id: string;
-    briefTitle: string | null;
+    title: string | null;
     raw_markdown: string;
   };
   interview: LeanInterviewEntry[];
@@ -326,7 +326,7 @@ export async function loadLeanInterviewContext(
   return {
     brief: {
       id: brief.id,
-      briefTitle: brief.title,
+      title: brief.title,
       raw_markdown: brief.raw_markdown,
     },
     interview: entries,
