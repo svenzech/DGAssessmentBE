@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-// ==== Pfade & .env laden (wie bei den anderen Skripten) ====
+// ==== Pfade & .env laden ====
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
@@ -21,7 +21,7 @@ const sb: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
   auth: { persistSession: false },
 });
 
-// ==== Typen für den Interview-Kontext ====
+// ==== Basis-Typen aus dem DB-Schema ====
 
 export type InterviewType = 'structure' | 'practice';
 
@@ -52,18 +52,6 @@ export interface BriefInfo {
   raw_markdown: string;
 }
 
-export interface FindingForInterview {
-  id: string;
-  sheet_id: string;
-  sheet_name: string;
-  theme: string;
-  question_id: string;
-  question_code: string;
-  question: string;
-  checkpoints: string[];
-  //finding: any;
-}
-
 export interface AnswerRecord {
   id: string;
   question_id: string | null;
@@ -71,19 +59,9 @@ export interface AnswerRecord {
   created_at: string;
 }
 
-export interface InterviewContext {
-  interview: InterviewRow;
-  user: {
-    id: string;
-  };
-  domain: DomainInfo | null;
-  brief: BriefInfo;
-  findings: FindingForInterview[];
-  answers: AnswerRecord[];
-}
+// ==== Ausführliche Findings (ehemals LeanFinding) ====
 
-// ==== "Lean" Typen für Flowise / LLM-Kontext ====
-export interface LeanFinding {
+export interface FindingForInterview {
   id: string;
   sheet_id: string;
   sheet_name: string;
@@ -101,34 +79,32 @@ export interface LeanFinding {
   open_questions: string[];
 }
 
-export interface LeanInterviewContext {
-  interview: {
-    id: string;
-    status: string;
-    interview_type: InterviewType;
-    created_at: string;
-    completed_at: string | null;
-    scorecard_json: any | null;
-  };
+// ==== Ausführlicher Interview-Context (neuer "Standard") ====
+
+export interface InterviewContext {
+  interview: InterviewRow;
   user: { id: string };
   domain: DomainInfo | null;
+  brief: BriefInfo;
+  findings: FindingForInterview[];
+  answers: AnswerRecord[];
+}
+
+// ==== Schlanke Typen für Flowise / LLM ====
+
+export interface LeanFinding {
+  question: string;
+  score_1_5: number | null;
+  evidence: string[];
+  open_questions: string[];
+}
+
+export interface LeanInterviewContext {
   brief: {
-    id: string;
-    title: string | null;
     raw_markdown: string;
-    version: number | null;
   };
-  findings: LeanFinding[];
-  // answers: LeanAnswer[]; // wenn Du sie später wieder brauchst
+  interview: LeanFinding[];
 }
-
-export interface LeanAnswer {
-  ts: string | null;
-  user_answer: string | null;
-  llm_status: string | null;
-  question_hint: string | null;
-}
-
 
 // ==== Hilfsfunktionen zum Laden der Daten ====
 
@@ -141,9 +117,7 @@ async function loadInterview(interviewId: string): Promise<InterviewRow> {
     .eq('id', interviewId)
     .single();
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
   if (!data) {
     throw new Error(`Kein Interview gefunden für id=${interviewId}`);
   }
@@ -158,9 +132,7 @@ async function loadBrief(briefId: string): Promise<BriefInfo> {
     .eq('id', briefId)
     .single();
 
-  if (error) {
-    throw error;
-  }
+  if (error) throw error;
   if (!data) {
     throw new Error(`Kein Brief gefunden für id=${briefId}`);
   }
@@ -186,118 +158,26 @@ async function loadDomain(domainId: string | null): Promise<DomainInfo | null> {
   return data as unknown as DomainInfo;
 }
 
-async function loadFindingsForBrief(
-  briefId: string,
-): Promise<FindingForInterview[]> {
-  const { data, error } = await sb
-    .from('brief_sheet_findings')
-    .select(
-      `
-      id,
-      brief_id,
-      sheet_id,
-      question_id,
-      finding_json,
-      sheet:overleitung_sheets (
-        id,
-        name,
-        theme
-      ),
-      question:sheet_questions (
-        id,
-        code,
-        question,
-        checkpoints
-      )
-    `,
-    )
-    .eq('brief_id', briefId);
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data || data.length === 0) {
-    return [];
-  }
-
-  const result: FindingForInterview[] = [];
-
-  for (const row of data as any[]) {
-    if (!row.sheet || !row.question) {
-      console.warn(
-        'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
-        row.id,
-      );
-      continue;
-    }
-
-    result.push({
-      id: row.id,
-      sheet_id: row.sheet.id,
-      sheet_name: row.sheet.name,
-      theme: row.sheet.theme,
-      question_id: row.question.id,
-      question_code: row.question.code,
-      question: row.question.question,
-      checkpoints: row.question.checkpoints || [],
-      // finding: row.finding_json,
-    });
-  }
-
-  return result;
-}
-
 async function loadAnswersForInterview(
   interviewId: string,
 ): Promise<AnswerRecord[]> {
   const { data, error } = await sb
     .from('answers')
-    .select('id, answer_json, created_at')
+    .select('id, answer_json, created_at, question_id')
     .eq('interview_id', interviewId)
     .order('created_at', { ascending: true });
 
-  if (error) {
-    throw error;
-  }
-
-  if (!data || data.length === 0) {
-    return [];
-  }
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
 
   return data as unknown as AnswerRecord[];
 }
 
-// ==== Hauptfunktion: Voller InterviewContext ====
+// ---- Findings (voll) -------------------------------------------------
 
-export async function loadInterviewContext(
-  interviewId: string,
-): Promise<InterviewContext> {
-  const interview = await loadInterview(interviewId);
-
-  const [brief, domain, findings, answers] = await Promise.all([
-    loadBrief(interview.brief_id),
-    loadDomain(interview.domain_id),
-    loadFindingsForBrief(interview.brief_id),
-    loadAnswersForInterview(interview.id),
-  ]);
-
-  const context: InterviewContext = {
-    interview,
-    user: {
-      id: interview.user_id,
-    },
-    domain,
-    brief,
-    findings,
-    answers,
-  };
-
-  return context;
-}
-
-// ==== Schlanke Variante für Flowise / LLM ====
-async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]> {
+async function loadFullFindingsForBrief(
+  briefId: string,
+): Promise<FindingForInterview[]> {
   const { data, error } = await sb
     .from('brief_sheet_findings')
     .select(
@@ -325,7 +205,7 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
-  const result: LeanFinding[] = [];
+  const result: FindingForInterview[] = [];
 
   for (const row of data as any[]) {
     if (!row.sheet || !row.question) {
@@ -336,7 +216,7 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
       continue;
     }
 
-    // Safety-Check, dass der FK konsistent ist
+    // Sanity-Check: FK question_id muss zum Join passen
     if (row.question.id !== row.question_id) {
       console.warn(
         'Inkonsistenter FK question_id vs. question.id bei Finding',
@@ -348,9 +228,8 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
     }
 
     const fj = row.finding_json ?? {};
-    const inner = fj.finding ?? fj; // falls du später das Schema mal "flach" machst
+    const inner = fj.finding ?? fj;
 
-    // Bewertungs-Infos
     const status =
       typeof inner.status === 'string' ? inner.status : null;
 
@@ -364,7 +243,6 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
     const rationale =
       typeof inner.rationale === 'string' ? inner.rationale : null;
 
-    // Frage / Code / Checkpoints – JSON hat Vorrang, DB ist Fallback
     const questionText =
       typeof fj.question === 'string'
         ? fj.question
@@ -380,7 +258,6 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
         ? fj.checkpoints
         : row.question.checkpoints ?? [];
 
-    // Evidence als einfache Liste von Strings
     const evidence = Array.isArray(fj.evidence)
       ? fj.evidence.map((e: any) =>
           typeof e === 'string'
@@ -415,40 +292,55 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
   return result;
 }
 
+// ==== Hauptfunktion: Ausführlicher Interview-Kontext ====
+
+export async function loadInterviewContext(
+  interviewId: string,
+): Promise<InterviewContext> {
+  const interview = await loadInterview(interviewId);
+
+  const [brief, domain, findings, answers] = await Promise.all([
+    loadBrief(interview.brief_id),
+    loadDomain(interview.domain_id),
+    loadFullFindingsForBrief(interview.brief_id),
+    loadAnswersForInterview(interview.id),
+  ]);
+
+  return {
+    interview,
+    user: { id: interview.user_id },
+    domain,
+    brief,
+    findings,
+    answers,
+  };
+}
+
+// ==== Schlanke Variante für Flowise / LLM ====
+
 export async function loadLeanInterviewContext(
   interviewId: string,
 ): Promise<LeanInterviewContext> {
   const interview = await loadInterview(interviewId);
+  const brief = await loadBrief(interview.brief_id);
+  const fullFindings = await loadFullFindingsForBrief(interview.brief_id);
 
-  const [brief, domain, findings] = await Promise.all([
-    loadBrief(interview.brief_id),
-    loadDomain(interview.domain_id),
-    loadLeanFindingsForBrief(interview.brief_id),
-  ]);
+  const leanFindings: LeanFinding[] = fullFindings.map((f) => ({
+    question: f.question,
+    score_1_5: f.score_1_5,
+    evidence: f.evidence,
+    open_questions: f.open_questions,
+  }));
 
   return {
-    interview: {
-      id: interview.id,
-      status: interview.status,
-      interview_type: interview.interview_type,
-      created_at: interview.created_at,
-      completed_at: interview.completed_at,
-      scorecard_json: interview.scorecard_json ?? null,
-    },
-    user: { id: interview.user_id },
-    domain,
     brief: {
-      id: brief.id,
-      title: brief.title,
       raw_markdown: brief.raw_markdown,
-      version: brief.version ?? null,
     },
-    findings,
+    interview: leanFindings,
   };
 }
 
-
-// ==== Optionaler CLI-Entry zum Testen ====
+// ==== Optionaler CLI-Entry zum Testen (Lean-Kontext) ====
 
 const isDirectRun =
   process.argv[1] &&
