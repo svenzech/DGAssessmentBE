@@ -83,24 +83,35 @@ export interface InterviewContext {
 }
 
 // ==== "Lean" Typen für Flowise / LLM-Kontext ====
-
 export interface LeanFinding {
   id: string;
   sheet_id: string;
   sheet_name: string;
   theme: string;
+
   question_id: string;
   question_code: string;
   question: string;
+  checkpoints: string[];
 
   status: string | null;
   score_1_5: number | null;
   rationale: string | null;
-  evidence: string[];        // nur die Zitate / Belege
-  open_questions: string[];  // Nachfragen an den Interviewpartner
+  evidence: string[];
+  open_questions: string[];
 }
 
 export interface LeanInterviewContext {
+  interview: {
+    id: string;
+    status: string;
+    interview_type: InterviewType;
+    created_at: string;
+    completed_at: string | null;
+    scorecard_json: any | null;
+  };
+  user: { id: string };
+  domain: DomainInfo | null;
   brief: {
     id: string;
     title: string | null;
@@ -108,6 +119,7 @@ export interface LeanInterviewContext {
     version: number | null;
   };
   findings: LeanFinding[];
+  // answers: LeanAnswer[]; // wenn Du sie später wieder brauchst
 }
 
 export interface LeanAnswer {
@@ -285,7 +297,6 @@ export async function loadInterviewContext(
 }
 
 // ==== Schlanke Variante für Flowise / LLM ====
-
 async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]> {
   const { data, error } = await sb
     .from('brief_sheet_findings')
@@ -304,7 +315,8 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
       question:sheet_questions (
         id,
         code,
-        question
+        question,
+        checkpoints
       )
     `,
     )
@@ -316,7 +328,7 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
   const result: LeanFinding[] = [];
 
   for (const row of data as any[]) {
-    if (!row.sheet_id || !row.question_id) {
+    if (!row.sheet || !row.question) {
       console.warn(
         'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
         row.id,
@@ -324,7 +336,64 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
       continue;
     }
 
+    // Safety-Check, dass der FK konsistent ist
+    if (row.question.id !== row.question_id) {
+      console.warn(
+        'Inkonsistenter FK question_id vs. question.id bei Finding',
+        row.id,
+        row.question_id,
+        row.question.id,
+      );
+      continue;
+    }
+
     const fj = row.finding_json ?? {};
+    const inner = fj.finding ?? fj; // falls du später das Schema mal "flach" machst
+
+    // Bewertungs-Infos
+    const status =
+      typeof inner.status === 'string' ? inner.status : null;
+
+    const score_1_5 =
+      typeof inner.score_1_5 === 'number'
+        ? inner.score_1_5
+        : typeof inner.score === 'number'
+        ? inner.score
+        : null;
+
+    const rationale =
+      typeof inner.rationale === 'string' ? inner.rationale : null;
+
+    // Frage / Code / Checkpoints – JSON hat Vorrang, DB ist Fallback
+    const questionText =
+      typeof fj.question === 'string'
+        ? fj.question
+        : row.question.question;
+
+    const questionCode =
+      typeof fj.question_code === 'string'
+        ? fj.question_code
+        : row.question.code;
+
+    const checkpoints =
+      Array.isArray(fj.checkpoints) && fj.checkpoints.length > 0
+        ? fj.checkpoints
+        : row.question.checkpoints ?? [];
+
+    // Evidence als einfache Liste von Strings
+    const evidence = Array.isArray(fj.evidence)
+      ? fj.evidence.map((e: any) =>
+          typeof e === 'string'
+            ? e
+            : typeof e.quote === 'string'
+            ? e.quote
+            : JSON.stringify(e),
+        )
+      : [];
+
+    const open_questions = Array.isArray(fj.open_questions)
+      ? fj.open_questions.map((q: any) => String(q))
+      : [];
 
     result.push({
       id: row.id,
@@ -332,46 +401,42 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
       sheet_name: row.sheet.name,
       theme: row.sheet.theme,
       question_id: row.question.id,
-      question_code: row.question.code,
-      question: row.question.question,
-
-      status: typeof fj.status === 'string' ? fj.status : null,
-      score_1_5:
-        typeof fj.score_1_5 === 'number' ? fj.score_1_5 : null,
-      rationale:
-        typeof fj.rationale === 'string' ? fj.rationale : null,
-      evidence: Array.isArray(fj.evidence)
-        ? fj.evidence.map((e: any) =>
-            typeof e === 'string'
-              ? e
-              : typeof e.quote === 'string'
-              ? e.quote
-              : JSON.stringify(e),
-          )
-        : [],
-      open_questions: Array.isArray(fj.open_questions)
-        ? fj.open_questions.map((q: any) => String(q))
-        : [],
+      question_code: questionCode,
+      question: questionText,
+      checkpoints,
+      status,
+      score_1_5,
+      rationale,
+      evidence,
+      open_questions,
     });
   }
 
   return result;
 }
 
-
 export async function loadLeanInterviewContext(
   interviewId: string,
 ): Promise<LeanInterviewContext> {
-  // 1) Interview nur, um brief_id zu bekommen
   const interview = await loadInterview(interviewId);
 
-  // 2) Steckbrief + Findings parallel laden
-  const [brief, findings] = await Promise.all([
+  const [brief, domain, findings] = await Promise.all([
     loadBrief(interview.brief_id),
+    loadDomain(interview.domain_id),
     loadLeanFindingsForBrief(interview.brief_id),
   ]);
 
   return {
+    interview: {
+      id: interview.id,
+      status: interview.status,
+      interview_type: interview.interview_type,
+      created_at: interview.created_at,
+      completed_at: interview.completed_at,
+      scorecard_json: interview.scorecard_json ?? null,
+    },
+    user: { id: interview.user_id },
+    domain,
     brief: {
       id: brief.id,
       title: brief.title,
@@ -381,6 +446,7 @@ export async function loadLeanInterviewContext(
     findings,
   };
 }
+
 
 // ==== Optionaler CLI-Entry zum Testen ====
 
