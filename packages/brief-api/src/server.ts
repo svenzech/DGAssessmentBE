@@ -64,7 +64,15 @@ app.use(express.json({ limit: '3mb' }));
 // Proxy-Endpoint für das Frontend: POST /api/flowise/chat
 app.post('/api/flowise/chat', async (req, res) => {
   try {
-    const { message, text, history, user, userId, username } = req.body ?? {};
+    const {
+      message,
+      text,
+      history,
+      user,
+      userId,
+      username,
+      overrideConfig: clientOverrideConfig,
+    } = req.body ?? {};
 
     const questionRaw =
       (typeof message === 'string' && message.trim().length > 0 && message) ||
@@ -129,7 +137,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     const userDbId = userRow.id as string;
     console.log('[FLOWISE_CHAT] gefundener User id =', userDbId);
 
-    // NEU: nur Interviews im Status "started", neueste zuerst
+    // Nur Interviews im Status "started", neueste zuerst
     const { data: interviewRow, error: intErr } = await supabase
       .from('interviews')
       .select('id, status, created_at')
@@ -153,7 +161,6 @@ app.post('/api/flowise/chat', async (req, res) => {
     }
 
     if (!interviewRow) {
-      // Es gibt Interviews, aber keins im Status "started" -> für den Chat als „kein Interview aktiv“
       return res.json({
         answer:
           'Für diesen Benutzer ist derzeit kein aktives Interview im Status "started" hinterlegt. ' +
@@ -172,7 +179,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     const interviewId = interviewRow.id as string;
 
     // ------------------------------
-    // 2) Flowise-Aufruf
+    // 2) History normalisieren
     // ------------------------------
     const rawHistory = Array.isArray(history) ? history : [];
     const normalizedHistory = rawHistory
@@ -207,34 +214,56 @@ app.post('/api/flowise/chat', async (req, res) => {
           x !== null,
       );
 
+    // ------------------------------
+    // 3) Flowise-Aufruf
+    // ------------------------------
+
     const flowiseUrl = `${FLOWISE_TARGET.replace(
       /\/$/,
       '',
     )}/api/v1/prediction/${FLOWISE_CHATFLOW_ID}`;
+
+    // clientOverrideConfig aus dem Frontend (kann z. B. internal Flags enthalten)
+    const clientOC =
+      clientOverrideConfig && typeof clientOverrideConfig === 'object'
+        ? clientOverrideConfig
+        : {};
+
+    const payload = {
+      // wichtig: user auf Top-Level → Flowise kann das für Memory nutzen
+      user: userIdentifier,
+      question,
+      history: normalizedHistory,
+
+      overrideConfig: {
+        // stabile Session + Chat pro Interview
+        sessionId: interviewId,
+        chatId: interviewId,
+        userId: userIdentifier,
+
+        // Client-Override (z. B. internal Flags) mit einbauen
+        ...clientOC,
+
+        // vars mergen, INTERVIEW_ID erzwingen
+        vars: {
+          ...(clientOC as any).vars,
+          INTERVIEW_ID: interviewId,
+        },
+      },
+    };
 
     console.log('[FLOWISE_CHAT] Request →', flowiseUrl, {
       user: userIdentifier,
       question,
       historyLen: normalizedHistory.length,
       interviewId,
+      overrideConfig: payload.overrideConfig,
     });
 
     const fwRes = await fetch(flowiseUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question,
-        history: normalizedHistory,
-        overrideConfig: {
-          user: userIdentifier,
-          // Hier wird die Interview-ID nach Flowise durchgereicht.
-          // In Flowise kannst Du sie als {{$vars.INTERVIEW_ID}} verwenden,
-          // z. B. für einen HTTP-Header x-interview-id.
-          vars: {
-            INTERVIEW_ID: interviewId, 
-          },
-        },
-      }),
+      body: JSON.stringify(payload),
     });
 
     const textBody = await fwRes.text();
@@ -256,7 +285,7 @@ app.post('/api/flowise/chat', async (req, res) => {
     );
 
     // ------------------------------
-    // 3) Bereinigung / Entschachtelung
+    // 4) Bereinigung / Entschachtelung
     // ------------------------------
     let cleanedAnswer = textBody;
     let meta: any = null;
@@ -270,16 +299,14 @@ app.post('/api/flowise/chat', async (req, res) => {
 
         const parts: string[] = [];
 
-        // kleine Hilfsfunktion, damit wir nie exakt die User-Frage spiegeln
         const pick = (val?: unknown): string | null => {
           if (typeof val !== 'string') return null;
           const t = val.trim();
           if (!t) return null;
-          if (t === question.trim()) return null; // kein bloßes Echo
+          if (t === question.trim()) return null;
           return t;
         };
 
-        // 1) Direktfelder auf oberster Ebene
         const directAnswer =
           pick(inner.answer) ??
           pick(inner.text) ??
@@ -292,7 +319,6 @@ app.post('/api/flowise/chat', async (req, res) => {
           parts.push(directAnswer);
         }
 
-        // 2) HTTP-Agent-Fall: data.responseBody auswerten
         if (parts.length === 0 && inner.data && inner.data.responseBody) {
           let rb: any = inner.data.responseBody;
 
@@ -323,14 +349,12 @@ app.post('/api/flowise/chat', async (req, res) => {
             }
           }
 
-          // falls responseBody nur ein String ist (nicht json), aber sinnvoll:
           if (parts.length === 0 && typeof rb === 'string') {
             const v = pick(rb);
             if (v) parts.push(v);
           }
         }
 
-        // 3) letzter Fallback: inner.text, falls noch nichts da und nicht identisch zur Frage
         if (parts.length === 0) {
           const v = pick(inner.text);
           if (v) parts.push(v);
@@ -1209,6 +1233,12 @@ app.post(
           .status(400)
           .json({ error: 'bad_request', message: 'answer_json fehlt.' });
       }
+
+    // Skip-Mechanismus
+    if (answer_json?.internal?.skipSave === true) {
+      console.log('[answers] skipSave=true → Antwort wird nicht gespeichert');
+      return res.status(200).json({ skipped: true });
+    }
 
       const saved = await saveAnswer({
         interviewId,
