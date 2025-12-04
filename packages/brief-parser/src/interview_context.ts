@@ -316,7 +316,7 @@ async function loadLeanFindingsForBrief(briefId: string): Promise<LeanFinding[]>
   const result: LeanFinding[] = [];
 
   for (const row of data as any[]) {
-    if (!row.sheet || !row.question) {
+    if (!row.sheet_id || !row.question_id) {
       console.warn(
         'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
         row.id,
