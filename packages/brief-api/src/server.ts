@@ -656,7 +656,10 @@ app.post('/api/interview/chat', async (req, res) => {
     // ------------------------------------------------------
     try {
       if (mode === 'answer') {
-        const lastAssistantMsg = [...llmHistoryTrimmed]
+
+        // Nur die aktuelle Session-History betrachten,
+        // nicht die komplette DB-History
+        const lastAssistantMsg = [...sessionHistory]
           .reverse()
           .find((h) => h.role === 'assistant');
 
@@ -763,7 +766,10 @@ try {
       answer,
       question: nextQuestion,
       status,
-      meta, 
+
+      // Wichtig: hier das Meta der NEUEN Frage zurückgeben
+      meta: nextQuestionMeta ?? null,
+
       raw: llmResult,
     });
   } catch (e: any) {
