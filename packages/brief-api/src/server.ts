@@ -530,20 +530,24 @@ app.post('/api/interview/chat', async (req, res) => {
     ) {
       mode = clientMode;
     } else {
-      const isFirstTurn = normalizedHistory.length === 0;
-      if (isFirstTurn) {
+      // "Erster Turn" = es gab bisher noch KEINEN Assistant-Output
+      const hasAssistantTurn = normalizedHistory.some(
+        (h) => h.role === 'apiMessage',
+      );
+
+      if (!hasAssistantTurn) {
         mode = 'start';
       } else {
-        // einfache Heuristik:
-        // Nachricht, die mit ? endet, als user_question behandeln
         const trimmed = question.trim();
+        // Heuristik: wenn der Nutzer eine inhaltliche Frage stellt, behandle sie als user_question
         if (trimmed.endsWith('?') && trimmed.length > 3) {
           mode = 'user_question';
         } else {
           mode = 'answer';
         }
       }
-    }
+
+
 
     console.log(
       '[INTERVIEW_CHAT] mode =',
@@ -583,14 +587,14 @@ app.post('/api/interview/chat', async (req, res) => {
       status,
       raw: llmResult,
     });
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in POST /api/interview/chat:', e);
-    return res.status(500).json({
-      error: 'internal',
-      message: e?.message ?? 'Unbekannter Fehler',
-    });
-  }
-});
+    }} catch (e: any) {
+      console.error('Unerwarteter Fehler in POST /api/interview/chat:', e);
+      return res.status(500).json({
+        error: 'internal',
+        message: e?.message ?? 'Unbekannter Fehler',
+      });
+    }
+  });
 
 
 // Upload-Konfiguration
