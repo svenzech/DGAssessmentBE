@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
+import { runInterviewTurn, InterviewMode } from './llm_interview';
 
 // Pfade bestimmen
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -379,6 +380,211 @@ app.post('/api/flowise/chat', async (req, res) => {
     });
   } catch (e: any) {
     console.error('Unerwarteter Fehler in POST /api/flowise/chat:', e);
+    return res.status(500).json({
+      error: 'internal',
+      message: e?.message ?? 'Unbekannter Fehler',
+    });
+  }
+});
+
+
+
+// ---- Direkter Interview-Chat ohne Flowise ----
+app.post('/api/interview/chat', async (req, res) => {
+  try {
+    const {
+      message,
+      text,
+      history,
+      user,
+      userId,
+      username,
+      mode: clientMode,
+    } = req.body ?? {};
+
+    const questionRaw =
+      (typeof message === 'string' && message.trim().length > 0 && message) ||
+      (typeof text === 'string' && text.trim().length > 0 && text) ||
+      null;
+
+    if (!questionRaw) {
+      return res.status(400).json({
+        error: 'bad_request',
+        message: 'Feld "message" (oder "text") im Body ist Pflicht.',
+      });
+    }
+
+    const question = questionRaw.trim();
+    const userIdentifier = user ?? userId ?? username ?? null;
+
+    if (!userIdentifier || typeof userIdentifier !== 'string') {
+      return res.json({
+        answer:
+          'Es konnte kein gültiger Benutzername ermittelt werden. ' +
+          'Bitte tragen Sie oben einen gültigen Benutzernamen ein oder starten Sie den Chat direkt aus LearnWorlds.',
+        raw: '',
+      });
+    }
+
+    console.log('[INTERVIEW_CHAT] userIdentifier =', userIdentifier);
+
+    // 1) User lookup wie bisher
+    const { data: userRow, error: userErr } = await supabase
+      .from('users')
+      .select('id, username')
+      .eq('username', userIdentifier)
+      .maybeSingle();
+
+    if (userErr) {
+      console.error('[INTERVIEW_CHAT] Fehler beim User-Lookup:', userErr);
+      return res.status(500).json({
+        error: 'user_lookup_failed',
+        message:
+          'Fehler bei der Benutzerprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!userRow) {
+      return res.json({
+        answer:
+          `Für den Benutzernamen "${userIdentifier}" ist kein Zugang zum Interview verfügbar. ` +
+          'Bitte prüfen Sie Ihre Kurszuordnung oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    const userDbId = userRow.id as string;
+    console.log('[INTERVIEW_CHAT] gefundener User id =', userDbId);
+
+    // 2) Aktives Interview ermitteln (wie in /api/flowise/chat)
+    const { data: interviewRow, error: intErr } = await supabase
+      .from('interviews')
+      .select('id, status, created_at')
+      .eq('user_id', userDbId)
+      .eq('status', 'started')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (intErr) {
+      console.error(
+        '[INTERVIEW_CHAT] Fehler beim Interview-Lookup für User',
+        userDbId,
+        intErr,
+      );
+      return res.status(500).json({
+        error: 'interview_lookup_failed',
+        message:
+          'Fehler bei der Interviewprüfung. Bitte versuchen Sie es später erneut.',
+      });
+    }
+
+    if (!interviewRow) {
+      return res.json({
+        answer:
+          'Für diesen Benutzer ist derzeit kein aktives Interview im Status "started" hinterlegt. ' +
+          'Bitte starten Sie zunächst ein Interview im Editor oder wenden Sie sich an die Kursbetreuung.',
+        raw: '',
+      });
+    }
+
+    const interviewId = interviewRow.id as string;
+    console.log(
+      '[INTERVIEW_CHAT] Interview gefunden:',
+      interviewId,
+      'Status =',
+      interviewRow.status,
+    );
+
+    // 3) History nur für Modus-Erkennung verwenden (optional)
+    const rawHistory = Array.isArray(history) ? history : [];
+    const normalizedHistory = rawHistory
+      .map((item: any, idx: number) => {
+        if (!item || typeof item.content !== 'string') return null;
+        const content = item.content;
+        const role = item.role;
+        if (role === 'user' || role === 'userMessage') {
+          return { role: 'userMessage', content };
+        }
+        if (role === 'assistant' || role === 'apiMessage') {
+          return { role: 'apiMessage', content };
+        }
+        console.warn(
+          '[INTERVIEW_CHAT] History-Item mit unbekannter Rolle übersprungen',
+          { idx, role },
+        );
+        return null;
+      })
+      .filter(
+        (x): x is { role: 'userMessage' | 'apiMessage'; content: string } =>
+          x !== null,
+      );
+
+    // 4) Modus bestimmen: entweder vom Client oder heuristisch
+    let mode: InterviewMode;
+
+    if (
+      clientMode === 'start' ||
+      clientMode === 'answer' ||
+      clientMode === 'user_question'
+    ) {
+      mode = clientMode;
+    } else {
+      const isFirstTurn = normalizedHistory.length === 0;
+      if (isFirstTurn) {
+        mode = 'start';
+      } else {
+        // einfache Heuristik:
+        // Nachricht, die mit ? endet, als user_question behandeln
+        const trimmed = question.trim();
+        if (trimmed.endsWith('?') && trimmed.length > 3) {
+          mode = 'user_question';
+        } else {
+          mode = 'answer';
+        }
+      }
+    }
+
+    console.log(
+      '[INTERVIEW_CHAT] mode =',
+      mode,
+      'historyLen =',
+      normalizedHistory.length,
+    );
+
+    // 5) Interview-Kontext laden
+    const ctx = await loadLeanInterviewContext(interviewId);
+
+    // 6) LLM-Turn ausführen
+    const llmResult = await runInterviewTurn({
+      mode,
+      lastUserMessage: question,
+      interviewContext: ctx,
+    });
+
+    // 7) Antwort speichern (gleiche Logik wie /api/interviews/answers)
+    try {
+      await saveAnswer({
+        interviewId,
+        answerJson: llmResult,
+      });
+      console.log('[INTERVIEW_CHAT] Antwort gespeichert.');
+    } catch (saveErr) {
+      console.error('[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:', saveErr);
+      // Fehler hier ist nicht fatal für den Nutzer, aber wird geloggt
+    }
+
+    const { answer = '', question: nextQuestion = '', status = 'continue' } =
+      llmResult;
+
+    return res.json({
+      answer,
+      question: nextQuestion,
+      status,
+      raw: llmResult,
+    });
+  } catch (e: any) {
+    console.error('Unerwarteter Fehler in POST /api/interview/chat:', e);
     return res.status(500).json({
       error: 'internal',
       message: e?.message ?? 'Unbekannter Fehler',
