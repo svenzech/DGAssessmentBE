@@ -12,10 +12,17 @@ const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 export type InterviewMode = 'start' | 'answer' | 'user_question';
 
+export type ChatHistoryEntry = {
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+
 export interface RunInterviewTurnArgs {
   mode: InterviewMode;
   lastUserMessage: string;
   interviewContext: any; // Struktur kommt aus loadLeanInterviewContext
+  chatHistory: ChatHistoryEntry[]; // gesamte Chat-Historie
 }
 
 export interface InterviewTurnResult {
@@ -53,14 +60,21 @@ Eingabe ist IMMER ein JSON-Objekt mit folgendem Schema:
         "score_1_5": 1 | 2 | 3 | 4 | 5 | null,
         "evidence": ["<Zitat aus dem Steckbrief>", "..."],
         "open_questions": ["<konkrete Rückfrage>", "..."],
-        "has_answer": true | false
+        "status": "<optional: z.B. asked/answered/unknown>"
       }
       // ...
     ],
     "meta": {
       "interaction_count": <number>  // optional, kann fehlen
     }
-  }
+  },
+  "history": [
+    {
+      "role": "assistant" | "user",
+      "content": "Text"
+    }
+    // chronologisch, älteste zuerst
+  ]
 }
 
 Nutze "mode" wie folgt:
@@ -68,26 +82,35 @@ Nutze "mode" wie folgt:
 - mode = "start":
   * Ignoriere last_user_message.
   * Wähle das wichtigste Interview-Item, das noch keine Antwort hat
-    (has_answer = false oder fehlt).
+    (status ist nicht "answered", oder das Item kommt in history noch nicht vor).
   * Priorisierung:
       1. score_1_5 = null oder 1,
       2. dann 2 oder 3,
       3. 4 oder 5 nur, wenn die Formulierungen vage sind.
   * Nutze die open_questions als Vorschlag für eine konkrete Rückfrage.
+  * Stelle KEINE Frage, die in der history bereits als assistant-content vorkommt.
 
 - mode = "answer":
-  * Behandle last_user_message als Antwort auf DEINE letzte Frage.
+  * Behandle last_user_message primär als Antwort auf DEINE letzte Frage.
   * Ergänze damit gedanklich die Informationen in interview_context.
+  * Wenn die Nachricht gleichzeitig eine Rückfrage oder Unsicherheit enthält,
+    darfst du sie kurz im Feld "answer" adressieren.
   * Wähle anschließend die nächste relevante Leitfrage gemäß Priorisierung.
+  * Stelle KEINE Frage, die du bereits früher im Verlauf gestellt hast
+    (erkenne das anhand von history.role = "assistant").
 
 - mode = "user_question":
   * Beantworte die Frage des Nutzers kurz und präzise im Feld "answer".
   * Stelle danach eine neue Interviewfrage im Feld "question", sofern status = "continue".
+  * Wiederhole auch hier keine früheren Fragen aus der history.
 
 Vor jeder Frage:
 - Prüfe brief.raw_markdown und evidence des gewählten Items.
 - Stelle KEINE Frage, wenn die Information dort bereits klar beschrieben ist.
-- Wenn etwas nur angedeutet oder vage ist, darfst Du gezielt nachschärfen.
+- Wenn etwas nur angedeutet oder vage ist, darfst du gezielt nachschärfen.
+- Nutze history, um:
+  * bereits gestellte Fragen zu erkennen und zu vermeiden,
+  * Anschlussfragen zu formulieren, wenn ein Thema schon diskutiert wurde.
 
 Ausgabeformat:
 DU GIBST IMMER UND AUSSCHLIESSLICH EIN JSON-OBJEKT MIT GENAU DIESEN FELDERN ZURÜCK:
@@ -110,12 +133,13 @@ DU GIBST IMMER UND AUSSCHLIESSLICH EIN JSON-OBJEKT MIT GENAU DIESEN FELDERN ZUR�
 export async function runInterviewTurn(
   args: RunInterviewTurnArgs,
 ): Promise<InterviewTurnResult> {
-  const { mode, lastUserMessage, interviewContext } = args;
+  const { mode, lastUserMessage, interviewContext, chatHistory } = args;
 
   const userPayload = {
     mode,
     last_user_message: lastUserMessage,
     interview_context: interviewContext,
+    history: chatHistory,
   };
 
   const completion = await openai.chat.completions.create({
@@ -139,7 +163,6 @@ export async function runInterviewTurn(
   try {
     parsed = JSON.parse(raw);
   } catch (err) {
-    // Fallback: wenn etwas schiefgeht, gib wenigstens eine sinnvolle Frage zurück
     parsed = {
       answer: '',
       question:

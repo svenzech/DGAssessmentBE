@@ -4,7 +4,11 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import { runInterviewTurn, InterviewMode } from './llm_interview';
+import {
+  runInterviewTurn,
+  type InterviewMode,
+  type ChatHistoryEntry,
+} from './llm_interview';
 
 // Pfade bestimmen
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -520,6 +524,19 @@ app.post('/api/interview/chat', async (req, res) => {
           x !== null,
       );
 
+      // 3b) LLM-History im Format { role: 'user' | 'assistant', content: string }
+      const llmHistory: ChatHistoryEntry[] = normalizedHistory.map((h) => ({
+        role: h.role === 'apiMessage' ? 'assistant' : 'user',
+        content: h.content,
+      }));
+
+      // Optional: Historie begrenzen, damit der Prompt nicht unendlich wächst
+      const MAX_HISTORY_ENTRIES = 20;
+      const llmHistoryTrimmed =
+        llmHistory.length > MAX_HISTORY_ENTRIES
+          ? llmHistory.slice(llmHistory.length - MAX_HISTORY_ENTRIES)
+          : llmHistory;
+
     // 4) Modus bestimmen: entweder vom Client oder heuristisch
     let mode: InterviewMode;
 
@@ -547,8 +564,6 @@ app.post('/api/interview/chat', async (req, res) => {
         }
       }
 
-
-
     console.log(
       '[INTERVIEW_CHAT] mode =',
       mode,
@@ -564,6 +579,7 @@ app.post('/api/interview/chat', async (req, res) => {
       mode,
       lastUserMessage: question,
       interviewContext: ctx,
+      chatHistory: llmHistoryTrimmed,
     });
 
     // 7) Antwort speichern (gleiche Logik wie /api/interviews/answers)
