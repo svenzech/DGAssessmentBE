@@ -570,7 +570,7 @@ app.post('/api/interview/chat', async (req, res) => {
 
     let llmHistory: ChatHistoryEntry[] = [...dbHistory, ...sessionHistory];
 
-    const MAX_HISTORY_ENTRIES = 20;
+    const MAX_HISTORY_ENTRIES = 250;
     const llmHistoryTrimmed =
       llmHistory.length > MAX_HISTORY_ENTRIES
         ? llmHistory.slice(llmHistory.length - MAX_HISTORY_ENTRIES)
@@ -614,7 +614,7 @@ app.post('/api/interview/chat', async (req, res) => {
     // 5) Interview-Kontext laden (Lean)
     const ctx = await loadLeanInterviewContext(interviewId);
 
-    // 6) LLM-Turn ausführen
+        // 6) LLM-Turn ausführen
     const llmResult = await runInterviewTurn({
       mode,
       lastUserMessage: userAnswer,
@@ -627,6 +627,7 @@ app.post('/api/interview/chat', async (req, res) => {
       question: nextQuestion = '',
       status = 'continue',
       finding_id: answeredFindingId = null,
+      next_finding_id: nextFindingId = null,
     } = llmResult as any;
 
     // ------------------------------------------------------
@@ -701,11 +702,19 @@ app.post('/api/interview/chat', async (req, res) => {
     } | null = null;
 
     try {
-      // Wir haben im System-Prompt next_finding_id entfernt,
-      // daher bestimmen wir das nächste Finding nur über die Frage selbst nicht mehr.
-      // Wenn Du später wieder ein explizites Mapping brauchst,
-      // kannst Du das hier ergänzen.
-      nextQuestionMeta = null;
+      if (nextFindingId && Array.isArray(ctx.interview)) {
+        const matchedNext =
+          ctx.interview.find((item: any) => item.id === nextFindingId) ?? null;
+
+        if (matchedNext) {
+          nextQuestionMeta = {
+            finding_id: matchedNext.id ?? nextFindingId,
+            theme: matchedNext.theme ?? null,
+            sheet_id: matchedNext.sheet_id ?? null,
+            sheet_name: matchedNext.sheet_name ?? null,
+          };
+        }
+      }
     } catch (metaErr) {
       console.warn(
         '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
@@ -718,7 +727,7 @@ app.post('/api/interview/chat', async (req, res) => {
       answer,
       question: nextQuestion,
       status,
-      meta: nextQuestionMeta, // aktuell null, Badge kommt über Kontext
+      meta: nextQuestionMeta, // z.B. Badge: meta.theme
       raw: llmResult,
     });
   } catch (e: any) {

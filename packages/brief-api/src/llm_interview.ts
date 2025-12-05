@@ -22,17 +22,18 @@ export interface RunInterviewTurnArgs {
   interviewContext: any;        // Struktur kommt aus loadLeanInterviewContext
   chatHistory: ChatHistoryEntry[];
   previousAssistantQuestion?: string | null; // optionaler Zusatz, falls du es später verwendest
-}
+};
+
 
 export interface InterviewTurnResult {
   answer: string;
   question: string;
   status: string;
   finding_id?: string | null;
-  next_finding_id?: string | null;
-
+  next_finding_id?: string | null; // nur für UI, NICHT in answers speichern
+  // zusätzlich alles, was das LLM sonst noch zurückgibt
   [key: string]: any;
-}
+};
 
 
 // ======================================================================
@@ -276,7 +277,6 @@ export async function runInterviewTurn(
   const question = typeof parsed.question === 'string' ? parsed.question : '';
   const status = typeof parsed.status === 'string' ? parsed.status : 'continue';
 
-  // IDs müssen string oder null sein
   const finding_id =
     typeof parsed.finding_id === 'string' || parsed.finding_id === null
       ? parsed.finding_id
