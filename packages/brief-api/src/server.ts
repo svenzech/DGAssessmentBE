@@ -763,7 +763,7 @@ try {
       answer,
       question: nextQuestion,
       status,
-      meta: nextQuestionMeta, // z.B. Badge: meta.theme
+      meta, 
       raw: llmResult,
     });
   } catch (e: any) {
