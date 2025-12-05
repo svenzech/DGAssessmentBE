@@ -600,10 +600,8 @@ try {
   if (previousQuestion) {
     const answerJson = {
       kind: 'interview_chat_v1',
-      previous_question: previousQuestion,      // <-- hier der wichtige Fix
+      llm_question: previousQuestion,      // ie vorherige Frage ist die hier relevante
       user_answer: question,                   // aktuelle Nutzereingabe
-      llm_question: llmResult.question ?? null, // neue Interviewfrage
-      llm_answer: llmResult.answer ?? null,     // optionaler LLM-Antworttext
       status: llmResult.status ?? 'continue',
     };
 
