@@ -584,13 +584,13 @@ app.post('/api/interview/chat', async (req, res) => {
       answer = '',
       question: nextQuestion = '',
       status = 'continue',
-      question_id: answeredQuestionId = null,
-      next_question_id: nextQuestionId = null,
+      finding_id: answeredFindingId = null,
+      next_finding_id: nextFindingId = null,
     } = llmResult as any;
 
-    // ------------------------------------------------------
+        // ------------------------------------------------------
     // 7) Antwort speichern: previous Bot-Frage + User-Antwort
-    //    MAPPING über question_id vom LLM
+    //    MAPPING über finding_id vom LLM
     // ------------------------------------------------------
     try {
       if (mode === 'answer') {
@@ -603,23 +603,34 @@ app.post('/api/interview/chat', async (req, res) => {
         if (previousQuestion) {
           let matchedItem: any | null = null;
 
-          if (answeredQuestionId && Array.isArray(ctx.interview)) {
+          //
+          // WICHTIG:
+          // In loadLeanInterviewContext heißt das Feld für die eindeutige Finding-ID
+          // **id** – NICHT finding_id.
+          //
+          // Daher vergleichen wir:
+          //
+          //   item.id === answeredFindingId
+          //
+          //
+          if (answeredFindingId && Array.isArray(ctx.interview)) {
             matchedItem =
               ctx.interview.find(
-                (item: any) => item.question_id === answeredQuestionId,
+                (item: any) => item.id === answeredFindingId
               ) ?? null;
           }
 
+          // korrekter Storage: wir speichern exakt ein Q&A-Paar
           const answerJson = {
             kind: 'interview_chat_v1',
 
-            // Leitfrage-Mapping (für spätere Auswertung)
-            question_id: answeredQuestionId,
+            // Leitfrage-Mapping (für spätere Analyse)
+            finding_id: answeredFindingId ?? null,
             theme: matchedItem?.theme ?? null,
             sheet_id: matchedItem?.sheet_id ?? null,
             sheet_name: matchedItem?.sheet_name ?? null,
 
-            // Tatsächliches Q&A-Paar in diesem Turn
+            // Tatsächliches Frage-Antwort-Paar
             llm_question: previousQuestion,
             user_answer: userAnswer,
 
@@ -634,26 +645,28 @@ app.post('/api/interview/chat', async (req, res) => {
           console.log('[INTERVIEW_CHAT] Antwort gespeichert:', answerJson);
         } else {
           console.log(
-            '[INTERVIEW_CHAT] Keine previousQuestion gefunden → nichts gespeichert.',
+            '[INTERVIEW_CHAT] Keine previousQuestion gefunden → nichts gespeichert.'
           );
         }
       } else {
         console.log(
           '[INTERVIEW_CHAT] mode != answer (',
           mode,
-          ') → keine Antwort gespeichert.',
+          ') → keine Antwort gespeichert.'
         );
       }
     } catch (saveErr) {
       console.error(
         '[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:',
-        saveErr,
+        saveErr
       );
     }
 
-    // 8) Meta-Infos für Frontend-Badge zur NÄCHSTEN Frage
+    // ------------------------------------------------------
+    // 8) Meta für Frontend (Badge usw.) basierend auf next_finding_id
+    // ------------------------------------------------------
     let nextQuestionMeta: {
-      question_id: string | null;
+      finding_id: string | null;
       theme: string | null;
       sheet_id: string | null;
       sheet_name: string | null;
@@ -662,16 +675,16 @@ app.post('/api/interview/chat', async (req, res) => {
     try {
       let matchedNext: any | null = null;
 
-      if (nextQuestionId && Array.isArray(ctx.interview)) {
+      if (nextFindingId && Array.isArray(ctx.interview)) {
         matchedNext =
           ctx.interview.find(
-            (item: any) => item.question_id === nextQuestionId,
+            (item: any) => item.id === nextFindingId
           ) ?? null;
       }
 
       if (matchedNext) {
         nextQuestionMeta = {
-          question_id: matchedNext.question_id ?? nextQuestionId,
+          finding_id: matchedNext.id ?? nextFindingId,
           theme: matchedNext.theme ?? null,
           sheet_id: matchedNext.sheet_id ?? null,
           sheet_name: matchedNext.sheet_name ?? null,
@@ -680,16 +693,18 @@ app.post('/api/interview/chat', async (req, res) => {
     } catch (metaErr) {
       console.warn(
         '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
-        metaErr,
+        metaErr
       );
     }
 
-    // 9) Antwort an das Frontend
+    // ------------------------------------------------------
+    // 9) Antwort an das Frontend zurückgeben
+    // ------------------------------------------------------
     return res.json({
       answer,
       question: nextQuestion,
       status,
-      meta: nextQuestionMeta, // z.B. Badge: meta.theme
+      meta: nextQuestionMeta, // z.B. Badge-Anzeige: meta.theme
       raw: llmResult,
     });
   } catch (e: any) {
@@ -700,7 +715,6 @@ app.post('/api/interview/chat', async (req, res) => {
     });
   }
 });
-
 
 // Upload-Konfiguration
 const upload = multer({
