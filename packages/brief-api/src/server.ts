@@ -1302,6 +1302,9 @@ app.post(
         answerJson: answer_json,
       });
 
+      console.log('[answers] Antwort: ' + JSON.stringify(answer_json));
+      console.log('[answers] answer_json.answer: ' + JSON.stringify(answer_json?.answer));
+
       res.json(saved);
     } catch (e: any) {
       console.error('Fehler in POST /api/interviews/.../answers:', e);
