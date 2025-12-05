@@ -693,34 +693,50 @@ app.post('/api/interview/chat', async (req, res) => {
       );
     }
 
-    // 8) Meta-Infos für Frontend-Badge zur NÄCHSTEN Frage
-    let nextQuestionMeta: {
-      finding_id: string | null;
-      theme: string | null;
-      sheet_id: string | null;
-      sheet_name: string | null;
-    } | null = null;
+    // ------------------------------------------------------
+// 8) Meta-Infos für Frontend-Badge (Theme der neuen Frage)
+// ------------------------------------------------------
 
-    try {
-      if (nextFindingId && Array.isArray(ctx.interview)) {
-        const matchedNext =
-          ctx.interview.find((item: any) => item.id === nextFindingId) ?? null;
+let nextQuestionMeta: {
+  finding_id: string | null;
+  theme: string | null;
+  sheet_id: string | null;
+  sheet_name: string | null;
+} | null = null;
 
-        if (matchedNext) {
-          nextQuestionMeta = {
-            finding_id: matchedNext.id ?? nextFindingId,
-            theme: matchedNext.theme ?? null,
-            sheet_id: matchedNext.sheet_id ?? null,
-            sheet_name: matchedNext.sheet_name ?? null,
-          };
-        }
-      }
-    } catch (metaErr) {
-      console.warn(
-        '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
-        metaErr,
-      );
+try {
+  if (nextQuestion && Array.isArray(ctx.interview)) {
+    // 1) LLM liefert optional next_finding_id → bevorzugt nutzen
+    let match = null;
+
+    if (nextFindingId) {
+      match = ctx.interview.find((item: any) => item.id === nextFindingId) ?? null;
     }
+
+    // 2) Falls keine finding_id geliefert wurde → Frage-Text matchen
+    if (!match) {
+      match = ctx.interview.find((item: any) => {
+        if (!item.question) return false;
+        return nextQuestion.trim().startsWith(item.question.trim());
+      });
+    }
+
+    // 3) Wenn wir ein Item gefunden haben → Meta erzeugen
+    if (match) {
+      nextQuestionMeta = {
+        finding_id: match.id,
+        theme: match.theme ?? null,
+        sheet_id: match.sheet_id ?? null,
+        sheet_name: match.sheet_name ?? null,
+      };
+    }
+  }
+} catch (metaErr) {
+  console.warn(
+    '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
+    metaErr,
+  );
+}
 
     // 9) Antwort an das Frontend
     return res.json({
