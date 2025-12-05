@@ -583,26 +583,25 @@ app.post('/api/interview/chat', async (req, res) => {
     });
 
 // ------------------------------------------------------
-// 7) Antwort korrekt speichern: previous_question + user_answer
+// 7) Antwort korrekt speichern: nur im Modus "answer"
 // ------------------------------------------------------
 try {
-  // LLM History enthält assistant/user in der richtigen Reihenfolge
-  // → letzte Bot-Frage extrahieren
+  // letzte Assistant-Nachricht (die Frage, auf die gerade geantwortet wird)
   const lastAssistantMsg = [...llmHistoryTrimmed]
     .reverse()
     .find((h) => h.role === 'assistant');
 
-  const previousQuestion =
-    lastAssistantMsg?.content?.trim() || null;
+  const previousQuestion = lastAssistantMsg?.content?.trim() || null;
 
-  // Nur speichern, wenn es eine vorherige Frage gibt
-  // (beim ersten Bot-Start gibt es noch keine)
-  if (previousQuestion) {
+  // Nur speichern, wenn
+  // - es überhaupt eine vorherige Bot-Frage gibt
+  // - der aktuelle Turn wirklich eine Antwort darauf ist
+  if (previousQuestion && mode === 'answer') {
     const answerJson = {
       kind: 'interview_chat_v1',
-      llm_question: previousQuestion,      // ie vorherige Frage ist die hier relevante
-      user_answer: question,                   // aktuelle Nutzereingabe
-      status: llmResult.status ?? 'continue',
+      llm_question: previousQuestion,        // relevante Frage (vom letzten Turn)
+      user_answer: question,                 // aktuelle Nutzereingabe
+      status: llmResult.status ?? 'continue'
     };
 
     await saveAnswer({
@@ -613,7 +612,11 @@ try {
     console.log('[INTERVIEW_CHAT] Antwort gespeichert:', answerJson);
   } else {
     console.log(
-      '[INTERVIEW_CHAT] Erste Interaktion – keine previous_question, nichts gespeichert.',
+      '[INTERVIEW_CHAT] Keine Antwort gespeichert (previousQuestion=',
+      previousQuestion,
+      ', mode=',
+      mode,
+      ')',
     );
   }
 } catch (saveErr) {
