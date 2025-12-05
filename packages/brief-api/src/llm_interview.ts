@@ -103,7 +103,7 @@ Bedeutung:
   Jedes Element ist ein Finding, also eine strukturierende Leitfrage plus Bewertungssignale.
 
   Wichtig:
-  * id = eindeutige interne ID des Findings (diese nutzt du für finding_id).
+  * id = eindeutige interne ID des Findings (diese nutzt du für finding_id und next_finding_id).
   * score_1_5:
       1 oder null = größte Lücken
       2–3       = deutliche Unschärfen
@@ -175,7 +175,8 @@ Antworte IMMER ausschließlich als valides JSON-Objekt mit GENAU diesen Feldern:
   "answer": "<Antwort auf Nutzerfrage oder empty string>",
   "question": "<eine neue Interviewfrage>",
   "status": "continue" | "[STOP] Struktur ausreichend geklärt." | "[STOP] Interview durch Nutzer beendet." | "[STOP] Interview nach 10 Interaktionen beendet.",
-  "finding_id": "<ID des Findings, das die letzte Frage repräsentiert, oder null>"
+  "finding_id": "<ID des Findings, das die letzte Frage repräsentiert, oder null>",
+  "next_finding_id": "<ID des Findings, zu dem die neue Frage gehört, oder null>"
 }
 
 Regeln:
@@ -185,6 +186,8 @@ Regeln:
 - finding_id:
     - Nur im Modus "answer" befüllen.
     - Setze sie auf die ID des Findings, zu dem deine letzte Assistant-Frage gehört.
+- next_finding_id:
+    - Setze sie immer auf die ID des Findings, zu dem die NEUE Frage gehört.
 - Wenn ausreichend Klarheit herrscht: status = "[STOP] Struktur ausreichend geklärt."
 - Wenn Nutzer abbrechen will: status = "[STOP] Interview durch Nutzer beendet."
 - Nach ca. 10 Interaktionen darf beendet werden.
