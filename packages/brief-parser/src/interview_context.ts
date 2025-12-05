@@ -61,7 +61,7 @@ export interface FindingForInterview {
   question_code: string;
   question: string;
   checkpoints: string[];
-  // finding_json?: any;
+  finding_json?: any;
 }
 
 export interface AnswerRecord {
@@ -217,7 +217,7 @@ async function loadFindingsForBrief(
       question_code: row.question.code,
       question: row.question.question,
       checkpoints: row.question.checkpoints || [],
-      // finding_json: row.finding_json,
+      finding_json: row.finding_json,
     });
   }
 
@@ -277,6 +277,11 @@ export async function loadLeanInterviewContext(
   // finding_json auflösen (Status, Score, Evidence, Open Questions)
   const entries: LeanInterviewEntry[] = [];
   for (const f of findings as any[]) {
+    // Debug: einmal sehen, was wirklich aus der DB kommt
+    if (!f.finding_json) {
+      console.warn('[LEAN_CTX] Finding ohne finding_json:', f.id);
+    }
+
     const fj = f.finding_json ?? {};
     const inner = fj.finding ?? fj;
 
