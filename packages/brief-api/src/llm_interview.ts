@@ -156,9 +156,9 @@ MODES
 mode = "start":
 - Ignoriere last_user_message vollständig.
 - Stelle die wichtigeste ungeklärte Frage aus interview[].
-- answer bleibt leer.
+- answer löschen.
 
-mode = "answer":
+mode = "answer" oder mode = unbekannt:
 - last_user_message ist die Antwort auf deine vorherige Frage.
 - Setze finding_id auf die ID des Findings, zu dem deine vorherige Frage gehörte.
 - Formuliere danach eine neue Frage aus einem noch ungeklärten Finding.
