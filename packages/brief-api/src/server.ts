@@ -500,7 +500,7 @@ app.post('/api/interview/chat', async (req, res) => {
       interviewRow.status,
     );
 
-    // 3) History normalisieren
+    // 3) History aus aktuellem Frontend-Request normalisieren
     const rawHistory = Array.isArray(history) ? history : [];
     const normalizedHistory = rawHistory
       .map((item: any, idx: number) => {
@@ -524,11 +524,51 @@ app.post('/api/interview/chat', async (req, res) => {
           x !== null,
       );
 
-    // 3b) LLM-History im Format { role: 'user' | 'assistant', content: string }
-    const llmHistory: ChatHistoryEntry[] = normalizedHistory.map((h) => ({
+    // 3b) Persistierte Q&A-Historie aus der DB laden
+    let dbHistory: ChatHistoryEntry[] = [];
+
+    try {
+      const { data: answersRows, error: answersErr } = await supabase
+        .from('answers')
+        .select('answer_json, created_at')
+        .eq('interview_id', interviewId)
+        .order('created_at', { ascending: true });
+
+      if (answersErr) {
+        console.error(
+          '[INTERVIEW_CHAT] Fehler beim Laden der Interview-Antworten:',
+          answersErr,
+        );
+      } else if (Array.isArray(answersRows)) {
+        for (const row of answersRows) {
+          const aj = row?.answer_json as any;
+          if (
+            aj &&
+            typeof aj.llm_question === 'string' &&
+            typeof aj.user_answer === 'string'
+          ) {
+            dbHistory.push(
+              { role: 'assistant', content: aj.llm_question },
+              { role: 'user', content: aj.user_answer },
+            );
+          }
+        }
+      }
+    } catch (dbHistErr) {
+      console.error(
+        '[INTERVIEW_CHAT] Unerwarteter Fehler beim Aufbau der DB-History:',
+        dbHistErr,
+      );
+    }
+
+    // 3c) LLM-History im Format { role: 'user' | 'assistant', content: string }
+    //     zuerst DB-History, dann aktuelle Session-History
+    const sessionHistory: ChatHistoryEntry[] = normalizedHistory.map((h) => ({
       role: h.role === 'apiMessage' ? 'assistant' : 'user',
       content: h.content,
     }));
+
+    let llmHistory: ChatHistoryEntry[] = [...dbHistory, ...sessionHistory];
 
     const MAX_HISTORY_ENTRIES = 20;
     const llmHistoryTrimmed =
@@ -536,7 +576,7 @@ app.post('/api/interview/chat', async (req, res) => {
         ? llmHistory.slice(llmHistory.length - MAX_HISTORY_ENTRIES)
         : llmHistory;
 
-    // 4) Modus bestimmen
+    // 4) Modus bestimmen (nur auf Basis der aktuellen Session-History)
     let mode: InterviewMode;
 
     if (
@@ -567,6 +607,8 @@ app.post('/api/interview/chat', async (req, res) => {
       mode,
       'historyLen =',
       normalizedHistory.length,
+      'dbHistoryLen =',
+      dbHistory.length,
     );
 
     // 5) Interview-Kontext laden (Lean)
@@ -585,10 +627,9 @@ app.post('/api/interview/chat', async (req, res) => {
       question: nextQuestion = '',
       status = 'continue',
       finding_id: answeredFindingId = null,
-      next_finding_id: nextFindingId = null,
     } = llmResult as any;
 
-        // ------------------------------------------------------
+    // ------------------------------------------------------
     // 7) Antwort speichern: previous Bot-Frage + User-Antwort
     //    MAPPING über finding_id vom LLM
     // ------------------------------------------------------
@@ -603,34 +644,23 @@ app.post('/api/interview/chat', async (req, res) => {
         if (previousQuestion) {
           let matchedItem: any | null = null;
 
-          //
-          // WICHTIG:
-          // In loadLeanInterviewContext heißt das Feld für die eindeutige Finding-ID
-          // **id** – NICHT finding_id.
-          //
-          // Daher vergleichen wir:
-          //
-          //   item.id === answeredFindingId
-          //
-          //
           if (answeredFindingId && Array.isArray(ctx.interview)) {
             matchedItem =
               ctx.interview.find(
-                (item: any) => item.id === answeredFindingId
+                (item: any) => item.id === answeredFindingId,
               ) ?? null;
           }
 
-          // korrekter Storage: wir speichern exakt ein Q&A-Paar
           const answerJson = {
             kind: 'interview_chat_v1',
 
-            // Leitfrage-Mapping (für spätere Analyse)
-            finding_id: answeredFindingId ?? null,
+            // Leitfrage-Mapping (für spätere Auswertung)
+            finding_id: answeredFindingId,
             theme: matchedItem?.theme ?? null,
             sheet_id: matchedItem?.sheet_id ?? null,
             sheet_name: matchedItem?.sheet_name ?? null,
 
-            // Tatsächliches Frage-Antwort-Paar
+            // Tatsächliches Q&A-Paar in diesem Turn
             llm_question: previousQuestion,
             user_answer: userAnswer,
 
@@ -645,26 +675,24 @@ app.post('/api/interview/chat', async (req, res) => {
           console.log('[INTERVIEW_CHAT] Antwort gespeichert:', answerJson);
         } else {
           console.log(
-            '[INTERVIEW_CHAT] Keine previousQuestion gefunden → nichts gespeichert.'
+            '[INTERVIEW_CHAT] Keine previousQuestion gefunden → nichts gespeichert.',
           );
         }
       } else {
         console.log(
           '[INTERVIEW_CHAT] mode != answer (',
           mode,
-          ') → keine Antwort gespeichert.'
+          ') → keine Antwort gespeichert.',
         );
       }
     } catch (saveErr) {
       console.error(
         '[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:',
-        saveErr
+        saveErr,
       );
     }
 
-    // ------------------------------------------------------
-    // 8) Meta für Frontend (Badge usw.) basierend auf next_finding_id
-    // ------------------------------------------------------
+    // 8) Meta-Infos für Frontend-Badge zur NÄCHSTEN Frage
     let nextQuestionMeta: {
       finding_id: string | null;
       theme: string | null;
@@ -673,38 +701,24 @@ app.post('/api/interview/chat', async (req, res) => {
     } | null = null;
 
     try {
-      let matchedNext: any | null = null;
-
-      if (nextFindingId && Array.isArray(ctx.interview)) {
-        matchedNext =
-          ctx.interview.find(
-            (item: any) => item.id === nextFindingId
-          ) ?? null;
-      }
-
-      if (matchedNext) {
-        nextQuestionMeta = {
-          finding_id: matchedNext.id ?? nextFindingId,
-          theme: matchedNext.theme ?? null,
-          sheet_id: matchedNext.sheet_id ?? null,
-          sheet_name: matchedNext.sheet_name ?? null,
-        };
-      }
+      // Wir haben im System-Prompt next_finding_id entfernt,
+      // daher bestimmen wir das nächste Finding nur über die Frage selbst nicht mehr.
+      // Wenn Du später wieder ein explizites Mapping brauchst,
+      // kannst Du das hier ergänzen.
+      nextQuestionMeta = null;
     } catch (metaErr) {
       console.warn(
         '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
-        metaErr
+        metaErr,
       );
     }
 
-    // ------------------------------------------------------
-    // 9) Antwort an das Frontend zurückgeben
-    // ------------------------------------------------------
+    // 9) Antwort an das Frontend
     return res.json({
       answer,
       question: nextQuestion,
       status,
-      meta: nextQuestionMeta, // z.B. Badge-Anzeige: meta.theme
+      meta: nextQuestionMeta, // aktuell null, Badge kommt über Kontext
       raw: llmResult,
     });
   } catch (e: any) {
