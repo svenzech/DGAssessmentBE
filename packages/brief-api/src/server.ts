@@ -582,17 +582,48 @@ app.post('/api/interview/chat', async (req, res) => {
       chatHistory: llmHistoryTrimmed,
     });
 
-    // 7) Antwort speichern (gleiche Logik wie /api/interviews/answers)
-    try {
-      await saveAnswer({
-        interviewId,
-        answerJson: llmResult,
-      });
-      console.log('[INTERVIEW_CHAT] Antwort gespeichert.');
-    } catch (saveErr) {
-      console.error('[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:', saveErr);
-      // Fehler hier ist nicht fatal für den Nutzer, aber wird geloggt
-    }
+// ------------------------------------------------------
+// 7) Antwort korrekt speichern: previous_question + user_answer
+// ------------------------------------------------------
+try {
+  // LLM History enthält assistant/user in der richtigen Reihenfolge
+  // → letzte Bot-Frage extrahieren
+  const lastAssistantMsg = [...llmHistoryTrimmed]
+    .reverse()
+    .find((h) => h.role === 'assistant');
+
+  const previousQuestion =
+    lastAssistantMsg?.content?.trim() || null;
+
+  // Nur speichern, wenn es eine vorherige Frage gibt
+  // (beim ersten Bot-Start gibt es noch keine)
+  if (previousQuestion) {
+    const answerJson = {
+      kind: 'interview_chat_v1',
+      previous_question: previousQuestion,      // <-- hier der wichtige Fix
+      user_answer: question,                   // aktuelle Nutzereingabe
+      llm_question: llmResult.question ?? null, // neue Interviewfrage
+      llm_answer: llmResult.answer ?? null,     // optionaler LLM-Antworttext
+      status: llmResult.status ?? 'continue',
+    };
+
+    await saveAnswer({
+      interviewId,
+      answerJson,
+    });
+
+    console.log('[INTERVIEW_CHAT] Antwort gespeichert:', answerJson);
+  } else {
+    console.log(
+      '[INTERVIEW_CHAT] Erste Interaktion – keine previous_question, nichts gespeichert.',
+    );
+  }
+} catch (saveErr) {
+  console.error(
+    '[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:',
+    saveErr,
+  );
+}
 
     const { answer = '', question: nextQuestion = '', status = 'continue' } =
       llmResult;
