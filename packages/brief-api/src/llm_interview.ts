@@ -28,6 +28,8 @@ export interface InterviewTurnResult {
   answer: string;
   question: string;
   status: string;
+  question_id?: string | null;
+  next_question_id?: string | null;
   // zusätzlich alles, was das LLM sonst noch zurückgibt
   [key: string]: any;
 }
@@ -199,9 +201,9 @@ mode = "user_question":
 - Beantworte die Frage des Nutzers kurz und präzise im Feld "answer".
 - Stelle danach im Feld "question" wieder eine Interviewfrage, falls status="continue".
 
---------------------------------
+//--------------------------------
 AUSGABEFORMAT
---------------------------------
+//--------------------------------
 
 Antworte IMMER ausschließlich als valides JSON-Objekt mit GENAU diesen Feldern:
 
@@ -211,13 +213,26 @@ Antworte IMMER ausschließlich als valides JSON-Objekt mit GENAU diesen Feldern:
   "status": "continue" ODER
             "[STOP] Struktur ausreichend geklärt." ODER
             "[STOP] Interview durch Nutzer beendet." ODER
-            "[STOP] Interview nach 10 Interaktionen beendet."
+            "[STOP] Interview nach 10 Interaktionen beendet.",
+  "question_id": "<ID des interview[]-Eintrags, auf den sich die LETZTE Nutzernachricht (last_user_message) bezieht, oder null>",
+  "next_question_id": "<ID des interview[]-Eintrags, zu dem deine NEUE Frage im Feld 'question' gehört, oder null>"
 }
 
 Regeln:
 
 - Stelle IMMER genau EINE Frage im Feld "question".
 - Wiederhole im Feld "question" KEINE Inhalte aus "answer".
+- Im Modus "answer":
+  - Behandle last_user_message als Antwort auf deine vorherige Frage.
+  - Setze question_id auf die question_id des passenden Elements aus interview[],
+    das diese vorherige Frage repräsentiert.
+- In den Modi "start" und "user_question":
+  - Setze question_id = null.
+- next_question_id:
+  - Wenn du im Feld "question" eine neue Interviewfrage stellst, setze
+    next_question_id auf die passende question_id aus interview[].
+  - Wenn du ausnahmsweise keine neue Interviewfrage stellst, setze
+    next_question_id = null.
 - Wenn du genug weißt, um den Steckbrief strukturell sauber zu ergänzen,
   setze status = "[STOP] Struktur ausreichend geklärt.".
 - Wenn die Antworten nicht mehr zielführend sind oder der Nutzer das
@@ -288,9 +303,8 @@ export async function runInterviewTurn(
     ],
   });
 
-  const raw = completion.choices[0]?.message?.content ?? '{}';
+    const raw = completion.choices[0]?.message?.content ?? '{}';
 
-  // Optional: auch die rohe LLM-Antwort einmal loggen
   console.log('[INTERVIEW_LLM] RAW COMPLETION:', raw);
 
   let parsed: any;
@@ -311,10 +325,22 @@ export async function runInterviewTurn(
   const question = typeof parsed.question === 'string' ? parsed.question : '';
   const status = typeof parsed.status === 'string' ? parsed.status : 'continue';
 
+  const question_id =
+    typeof parsed.question_id === 'string' || parsed.question_id === null
+      ? parsed.question_id
+      : null;
+
+  const next_question_id =
+    typeof parsed.next_question_id === 'string' || parsed.next_question_id === null
+      ? parsed.next_question_id
+      : null;
+
   return {
     ...parsed,
     answer,
     question,
     status,
+    question_id,
+    next_question_id,
   };
 }
