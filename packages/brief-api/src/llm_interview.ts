@@ -1,4 +1,3 @@
-// packages/brief-api/src/llm_interview.ts
 import OpenAI from 'openai';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -273,6 +272,9 @@ export async function runInterviewTurn(
 
   const completion = await openai.chat.completions.create({
     model: OPENAI_MODEL,
+    temperature: 0.1,   
+    top_p: 0.1,
+    max_tokens: 800, 
     response_format: { type: 'json_object' },
     messages: [
       {
