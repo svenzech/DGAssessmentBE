@@ -208,11 +208,16 @@ async function loadFindingsForBrief(
       continue;
     }
 
+    const theme =
+      row.sheet && typeof row.sheet.theme === 'string'
+        ? row.sheet.theme
+        : null;
+
     result.push({
       id: row.id,
       sheet_id: row.sheet.id,
       sheet_name: row.sheet.name,
-      theme: row.sheet.theme,
+      theme,
       question_id: row.question.id,
       question_code: row.question.code,
       question: row.question.question,
