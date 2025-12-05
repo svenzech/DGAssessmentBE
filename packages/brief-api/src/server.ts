@@ -630,6 +630,26 @@ app.post('/api/interview/chat', async (req, res) => {
       next_finding_id: nextFindingId = null,
     } = llmResult as any;
 
+    // -----------------------------------------------
+    // 6b) Meta-Objekt für das Frontend aufbauen (Badge)
+    // -----------------------------------------------
+    let meta: any = null;
+
+    if (answeredFindingId && Array.isArray(ctx.interview)) {
+      const matched = ctx.interview.find(
+        (item: any) => item.id === answeredFindingId
+      );
+
+      if (matched) {
+        meta = {
+          finding_id: matched.id,
+          theme: matched.theme ?? null,
+          sheet_id: matched.sheet_id ?? null,
+          sheet_name: matched.sheet_name ?? null,
+        };
+      }
+    }
+
     // ------------------------------------------------------
     // 7) Antwort speichern: previous Bot-Frage + User-Antwort
     //    MAPPING über finding_id vom LLM
