@@ -154,6 +154,7 @@ MODES
 --------------------------------
 
 mode = "start":
+- Ignoriere last_user_message vollständig.
 - Stelle die wichtigeste ungeklärte Frage aus interview[].
 - answer bleibt leer.
 
