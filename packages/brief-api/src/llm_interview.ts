@@ -255,7 +255,7 @@ export async function runInterviewTurn(
     });
 
     const pretty = JSON.stringify(userPayload, null, 2);
-    const maxLen = 8000;
+    const maxLen = 80000;
     const sliced =
       pretty.length > maxLen ? pretty.slice(0, maxLen) + '\n...[TRUNCATED]...' : pretty;
 
