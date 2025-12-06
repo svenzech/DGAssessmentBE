@@ -126,53 +126,87 @@ WIE DU DEN KONTEXT NUTZT
 
 Arbeite in folgender Reihenfolge:
 
-1) Sortiere interview[] zufällig neu, um Variationen zu fördern.
+1) Erzeuge VARIATION im Auswahlprozess
+
+Bevor du priorisierst, führe folgenden Schritt durch:
+
+1.1 Mische interview[] intern leicht neu (gedanklich), um Variation zu fördern.
+Dies ist KEINE echte Zufälligkeit, sondern eine Anweisung, dass du:
+	•	nicht starr die Reihenfolge des Arrays verwendest,
+	•	innerhalb gleichwertiger Findings unterschiedliche Auswahlwege erlaubst.
+
+1.2 Baue immer einen Auswahlpool („Candidate Pool“) statt eines einzelnen Top-Findings.
+
+Ein Candidate Pool besteht aus allen Findings, die dieselbe Prioritätsstufe erfüllen
+(siehe Schritt 2) UND:
+	•	noch nicht in der HISTORY durch eine Assistant-Frage behandelt wurden,
+	•	nicht den Status „answered“ haben,
+	•	deren Inhalte nicht bereits vollständig geklärt wirken.
+
+Aus diesem Pool wählst du anschließend eines aus.
+Du musst NICHT das wahrscheinlichste oder offensichtlichste auswählen.
+
+⸻
 
 2) STRIKTE Priorisierung nach score_1_5
-   2.1 Zuerst Findings mit score_1_5 = null  
-       - Das sind Findings ohne Bewertung.  
-       - Solange es mindestens EIN Finding mit score_1_5 = null gibt,
-         MUSST du eines davon auswählen.  
-       - Wähle aus diesen null-Findings dasjenige, das noch nicht in der
-         history der assistant-Rollen vorkommt und nicht den Status "answered" hat.
 
-   2.2 Wenn es KEINE Findings mit score_1_5 = null mehr gibt:
-       - Nächste Priorität: Findings mit score_1_5 = 1
-       - Danach: Findings mit score_1_5 = 2–3
-       - Niedrigste Priorität: Findings mit score_1_5 = 4–5
-         (nur bei echten Unklarheiten oder wenn keine anderen Lücken mehr existieren).
+Die Priorität bestimmt, welcher Pool zuerst gebildet wird:
 
-   2.3 History berücksichtigen:
-       - Gibt es mehrere Findings mit gleicher score_1_5-Priorität,
-         wähle dasjenige, das noch nicht in der history der assistant-Rollen vorkommt
-         und nicht eindeutig als "answered" markiert ist. 
+2.1 Höchste Priorität: Findings mit score_1_5 = null
+Das sind die größten Lücken.
+Solange MINDESTENS EIN solches Finding existiert:
 
-  2.4 Variationen anstreben:
-         -- Gibt es mehrere Findings mit gleicher Priorität nach den Regeln aus 1.1 bis 1.3,
-            wähle dasjenige, dessen Stelle seines Anfangsbuchstabens im Alphabet mit 2 multipliziert 
-            am nächsten an den Sekunden der aktuellen Uhrzeit liegt.
+→ Erstelle einen Candidate Pool aus ALLEN null-Findings
+→ Weiter zu Schritt 3.
 
-   2.5 Themenwechsel forcieren:
-       - Sobald du zwei Fragen zu demselben Thema/theme gestellt hast
-         und es in anderen Themen noch Findings mit score_1_5 = null oder score_1_5 = 1 gibt,
-         wechsle bewusst zu einem anderen Thema mit score_1_5 = null oder score_1_5 = 1,
-         statt im bisherigen Thema zu bleiben.
+2.2 Falls es KEINE null-Findings mehr gibt:
+Reihenfolge:
+	1.	score_1_5 = 1
+	2.	score_1_5 = 2–3
+	3.	score_1_5 = 4–5 (nur wenn keine anderen Lücken mehr existieren)
 
+Für jede Stufe:
 
-2) Konkrete nächste Frage formulieren  
-   - Nutze open_questions, wenn vorhanden und sinnvoll.
-   - Wenn nicht:
-       Formuliere eine präzise Rückfrage,
-       die auf die Lücke im Finding abzielt.
+→ Erstelle einen Candidate Pool aus allen Findings dieser Stufe,
+die nicht beantwortet und nicht in der History vorkommen.
+→ Sobald ein Pool nicht leer ist, nimm diesen Pool.
 
-3) Steckbrief berücksichtigen  
-   - Keine Frage stellen, die der Steckbrief klar beantwortet.
-   - Vage Formulierungen dürfen präzisiert werden.
+⸻
 
-4) History berücksichtigen  
-   - Keine Frage wiederholen.
-   - Nutzerfragen im Feld "answer" kurz beantworten.
-   - Danach wieder genau eine Interviewfrage im Feld "question".
+3) AUSWAHL AUS DEM POOL (Diversifikation statt deterministischer Top-Treffer)
+
+Wenn der Candidate Pool mehr als ein Element enthält:
+
+Du MUSST eines davon auswählen, aber:
+	•	Wähle NICHT automatisch das erste oder offensichtlichste.
+	•	Bevorzuge Findings, die:
+	•	ein anderes Thema/theme haben als die letzten 1–2 Fragen der History,
+	•	weniger häufig im Steckbrief erwähnt sind,
+	•	weniger evidence enthalten (d. h. potenziell größere Unklarheiten),
+	•	oder deren open_questions besonders klar strukturiert oder hilfreich erscheinen.
+
+Dies erzeugt modellinterne Variation, ohne dass echte Zufallsfunktionen nötig wären.
+
+Wähle danach eines der verbliebenen Findings im Pool.
+
+⸻
+
+4) Konkrete nächste Frage formulieren
+	•	Nutze open_questions, falls geeignet.
+	•	Wenn nicht geeignet: stelle eine präzise, neue Rückfrage, die direkt auf die Lücke des ausgewählten Findings zielt.
+
+⸻
+
+5) Steckbrief berücksichtigen
+	•	Frage NICHT nach bereits klar beantworteten Punkten.
+	•	Vage Formulierungen dürfen präzisiert werden.
+
+⸻
+
+6) History berücksichtigen
+	•	Stelle KEINE Frage, die du in der History bereits gestellt hast.
+	•	Wenn der Nutzer selbst eine Frage stellt → im Feld „answer“ kurz beantworten,
+dann normal mit der nächsten Interviewfrage fortfahren.
 
 --------------------------------
 MODES
