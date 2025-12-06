@@ -255,11 +255,11 @@ export async function runInterviewTurn(
     });
 
     const pretty = JSON.stringify(userPayload, null, 2);
-    const maxLen = 80000;
+    const maxLen = 8000;
     const sliced =
       pretty.length > maxLen ? pretty.slice(0, maxLen) + '\n...[TRUNCATED]...' : pretty;
 
-    console.log('[INTERVIEW_LLM] INPUT PAYLOAD JSON:\n', sliced);
+    // console.log('[INTERVIEW_LLM] INPUT PAYLOAD JSON:\n', sliced);
   } catch (err) {
     console.warn('[INTERVIEW_LLM] Konnte Input nicht loggen:', err);
   }
