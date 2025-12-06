@@ -4,11 +4,8 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import {
-  runInterviewTurn,
-  type InterviewMode,
-  type ChatHistoryEntry,
-} from './llm_interview';
+
+import { chatInterviewRouter } from './server/routes/chat_interview';
 
 // Pfade bestimmen
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,15 +33,26 @@ if (!FLOWISE_CHATFLOW_ID) {
 // Eigene Imports
 // ----------------------------------------
 import { startInterviewsForUser } from '../../brief-parser/src/start_interview_user';
-import { loadInterviewContext } from '../../brief-parser/src/interview_context';
-import { loadLeanInterviewContext } from '../../brief-parser/src/interview_context';
 import { saveAnswer } from '../../brief-parser/src/save_answer';
 import { evaluateInterview } from '../../brief-parser/src/evaluate_interview';
 import { evaluateBriefSheet } from '../../brief-parser/src/evaluate_brief_sheet';
 import { supabase } from './supabase_client';
+import {
+  loadContextForUserIdentifier,
+  loadContextForInterviewId,
+} from './server/core/context';
+
 import { classifyAndExtractUpload } from './llm_upload_parser';
-import test from 'node:test';
-import { title } from 'node:process';
+
+import {
+  resolveUserIdentifier,
+  findUserByUsername,
+} from './server/core/users';
+
+import {
+  loadActiveInterviewForUser,
+} from './server/core/interviews';
+
 
 // ----------------------------------------
 // Basis-Setup Express
@@ -52,6 +60,8 @@ import { title } from 'node:process';
 const app = express();
 
 const API_PORT = Number(process.env.PORT ?? process.env.BRIEF_API_PORT ?? 4000);
+
+app.use(chatInterviewRouter);
 
 const FALLBACK_DOMAIN_ID =
   process.env.FALLBACK_DOMAIN_ID ?? '00000000-0000-0000-0000-000000000000';
@@ -100,13 +110,14 @@ app.post('/api/flowise/chat', async (req, res) => {
       });
     }
 
-    const question = questionRaw.trim();
-    const userIdentifier = user ?? userId ?? username ?? null;
+        const question = questionRaw.trim();
 
     // ------------------------------
     // 1) User + Interview Check
     // ------------------------------
-    if (!userIdentifier || typeof userIdentifier !== 'string') {
+    const userIdentifier = resolveUserIdentifier({ user, userId, username });
+
+    if (!userIdentifier) {
       return res.json({
         answer:
           'Es konnte kein gültiger Benutzername ermittelt werden. ' +
@@ -117,13 +128,10 @@ app.post('/api/flowise/chat', async (req, res) => {
 
     console.log('[FLOWISE_CHAT] userIdentifier =', userIdentifier);
 
-    const { data: userRow, error: userErr } = await supabase
-      .from('users')
-      .select('id, username')
-      .eq('username', userIdentifier)
-      .maybeSingle();
-
-    if (userErr) {
+    let userRow: { id: string; username: string } | null = null;
+    try {
+      userRow = await findUserByUsername(userIdentifier);
+    } catch (userErr) {
       console.error('[FLOWISE_CHAT] Fehler beim User-Lookup:', userErr);
       return res.status(500).json({
         error: 'user_lookup_failed',
@@ -145,16 +153,10 @@ app.post('/api/flowise/chat', async (req, res) => {
     console.log('[FLOWISE_CHAT] gefundener User id =', userDbId);
 
     // Nur Interviews im Status "started", neueste zuerst
-    const { data: interviewRow, error: intErr } = await supabase
-      .from('interviews')
-      .select('id, status, created_at')
-      .eq('user_id', userDbId)
-      .eq('status', 'started')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (intErr) {
+    let interviewRow = null;
+    try {
+      interviewRow = await loadActiveInterviewForUser(userDbId);
+    } catch (intErr) {
       console.error(
         '[FLOWISE_CHAT] Fehler beim Interview-Lookup für User',
         userDbId,
@@ -392,389 +394,6 @@ app.post('/api/flowise/chat', async (req, res) => {
   }
 });
 
-
-// ---- Direkter Interview-Chat ohne Flowise ----
-app.post('/api/interview/chat', async (req, res) => {
-  try {
-    const {
-      message,
-      text,
-      history,
-      user,
-      userId,
-      username,
-      mode: clientMode,
-    } = req.body ?? {};
-
-    const questionRaw =
-      (typeof message === 'string' && message.trim().length > 0 && message) ||
-      (typeof text === 'string' && text.trim().length > 0 && text) ||
-      null;
-
-    if (!questionRaw) {
-      return res.status(400).json({
-        error: 'bad_request',
-        message: 'Feld "message" (oder "text") im Body ist Pflicht.',
-      });
-    }
-
-    const userAnswer = questionRaw.trim();
-    const userIdentifier = user ?? userId ?? username ?? null;
-
-    if (!userIdentifier || typeof userIdentifier !== 'string') {
-      return res.json({
-        answer:
-          'Es konnte kein gültiger Benutzername ermittelt werden. ' +
-          'Bitte tragen Sie oben einen gültigen Benutzernamen ein oder starten Sie den Chat direkt aus LearnWorlds.',
-        raw: '',
-      });
-    }
-
-    console.log('[INTERVIEW_CHAT] userIdentifier =', userIdentifier);
-
-    // 1) User lookup wie bisher
-    const { data: userRow, error: userErr } = await supabase
-      .from('users')
-      .select('id, username')
-      .eq('username', userIdentifier)
-      .maybeSingle();
-
-    if (userErr) {
-      console.error('[INTERVIEW_CHAT] Fehler beim User-Lookup:', userErr);
-      return res.status(500).json({
-        error: 'user_lookup_failed',
-        message:
-          'Fehler bei der Benutzerprüfung. Bitte versuchen Sie es später erneut.',
-      });
-    }
-
-    if (!userRow) {
-      return res.json({
-        answer:
-          `Für den Benutzernamen "${userIdentifier}" ist kein Zugang zum Interview verfügbar. ` +
-          'Bitte prüfen Sie Ihre Kurszuordnung oder wenden Sie sich an die Kursbetreuung.',
-        raw: '',
-      });
-    }
-
-    const userDbId = userRow.id as string;
-    console.log('[INTERVIEW_CHAT] gefundener User id =', userDbId);
-
-    // 2) Aktives Interview ermitteln
-    const { data: interviewRow, error: intErr } = await supabase
-      .from('interviews')
-      .select('id, status, created_at')
-      .eq('user_id', userDbId)
-      .eq('status', 'started')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (intErr) {
-      console.error(
-        '[INTERVIEW_CHAT] Fehler beim Interview-Lookup für User',
-        userDbId,
-        intErr,
-      );
-      return res.status(500).json({
-        error: 'interview_lookup_failed',
-        message:
-          'Fehler bei der Interviewprüfung. Bitte versuchen Sie es später erneut.',
-      });
-    }
-
-    if (!interviewRow) {
-      return res.json({
-        answer:
-          'Für diesen Benutzer ist derzeit kein aktives Interview im Status "started" hinterlegt. ' +
-          'Bitte starten Sie zunächst ein Interview im Editor oder wenden Sie sich an die Kursbetreuung.',
-        raw: '',
-      });
-    }
-
-    const interviewId = interviewRow.id as string;
-    console.log(
-      '[INTERVIEW_CHAT] Interview gefunden:',
-      interviewId,
-      'Status =',
-      interviewRow.status,
-    );
-
-    //
-    // 3) Session-History (nur aktueller Browser) normalisieren
-    //
-    const rawHistory = Array.isArray(history) ? history : [];
-
-    const normalizedSessionHistory = rawHistory
-      .map((item: any, idx: number) => {
-        if (!item || typeof item.content !== 'string') return null;
-        const content = item.content;
-        const role = item.role;
-
-        if (role === 'user' || role === 'userMessage') {
-          return { role: 'userMessage' as const, content };
-        }
-        if (role === 'assistant' || role === 'apiMessage') {
-          return { role: 'apiMessage' as const, content };
-        }
-
-        console.warn(
-          '[INTERVIEW_CHAT] History-Item mit unbekannter Rolle übersprungen',
-          { idx, role },
-        );
-        return null;
-      })
-      .filter(
-        (
-          x,
-        ): x is { role: 'userMessage' | 'apiMessage'; content: string } =>
-          x !== null,
-      );
-
-    // Session-History im LLM-Format
-    const sessionHistory: ChatHistoryEntry[] = normalizedSessionHistory.map(
-      (h) => ({
-        role: h.role === 'apiMessage' ? 'assistant' : 'user',
-        content: h.content,
-      }),
-    );
-
-    const MAX_SESSION_HISTORY = 20;
-    const sessionHistoryTrimmed =
-      sessionHistory.length > MAX_SESSION_HISTORY
-        ? sessionHistory.slice(sessionHistory.length - MAX_SESSION_HISTORY)
-        : sessionHistory;
-
-    //
-    // 4) DB-History aus answers (Kontext über Sessions hinweg)
-    //
-    let dbHistory: ChatHistoryEntry[] = [];
-    try {
-      const { data: answerRows, error: answersErr } = await supabase
-        .from('answers')
-        .select('answer_json, created_at')
-        .eq('interview_id', interviewId)
-        .order('created_at', { ascending: true });
-
-      if (answersErr) {
-        console.warn(
-          '[INTERVIEW_CHAT] Fehler beim Laden der answers-History:',
-          answersErr,
-        );
-      } else if (Array.isArray(answerRows)) {
-        const tmp: ChatHistoryEntry[] = [];
-        for (const row of answerRows as any[]) {
-          const aj = row.answer_json ?? {};
-          const llmQ =
-            typeof aj.llm_question === 'string' ? aj.llm_question.trim() : '';
-          const userA =
-            typeof aj.user_answer === 'string' ? aj.user_answer.trim() : '';
-
-          if (llmQ) {
-            tmp.push({ role: 'assistant', content: llmQ });
-          }
-          if (userA) {
-            tmp.push({ role: 'user', content: userA });
-          }
-        }
-        dbHistory = tmp;
-      }
-    } catch (err) {
-      console.warn(
-        '[INTERVIEW_CHAT] Unerwarteter Fehler beim Laden der DB-History:',
-        err,
-      );
-    }
-
-    //
-    // 5) Modus bestimmen – NUR über die Session-History!
-    //
-    let mode: InterviewMode;
-
-    if (
-      clientMode === 'start' ||
-      clientMode === 'answer' ||
-      clientMode === 'user_question'
-    ) {
-      mode = clientMode;
-    } else {
-      const hasAssistantTurn = normalizedSessionHistory.some(
-        (h) => h.role === 'apiMessage',
-      );
-
-      if (!hasAssistantTurn) {
-        // Erste Interaktion in dieser Browser-Session → start
-        mode = 'start';
-      } else {
-        const trimmed = userAnswer.trim();
-        if (trimmed.endsWith('?') && trimmed.length > 3) {
-          mode = 'user_question';
-        } else {
-          mode = 'answer';
-        }
-      }
-    }
-
-    console.log('[INTERVIEW_CHAT] mode =', mode, {
-      sessionHistoryLen: normalizedSessionHistory.length,
-      dbHistoryLen: dbHistory.length,
-    });
-
-    //
-    // 6) LLM-History = DB-History + Session-History (nur Kontext)
-    //
-    const combinedHistory: ChatHistoryEntry[] = [
-      ...dbHistory,
-      ...sessionHistoryTrimmed,
-    ];
-
-    const MAX_TOTAL_HISTORY = 40;
-    const llmHistoryTrimmed =
-      combinedHistory.length > MAX_TOTAL_HISTORY
-        ? combinedHistory.slice(combinedHistory.length - MAX_TOTAL_HISTORY)
-        : combinedHistory;
-
-    // 7) Interview-Kontext laden (Lean)
-    const ctx = await loadLeanInterviewContext(interviewId);
-
-    // 8) LLM-Turn ausführen
-    const llmResult = await runInterviewTurn({
-      mode,
-      lastUserMessage: userAnswer,
-      interviewContext: ctx,
-      chatHistory: llmHistoryTrimmed,
-    });
-
-    const {
-      answer = '',
-      question: nextQuestion = '',
-      status = 'continue',
-      finding_id: answeredFindingId = null,
-    } = llmResult as any;
-
-    // ------------------------------------------------------
-    // 9) Antwort speichern: previous Bot-Frage + User-Antwort
-    //    MAPPING nur über die Session-History
-    // ------------------------------------------------------
-    try {
-      if (mode === 'answer') {
-        // Nur letzte Assistant-Nachricht der aktuellen Browser-Session betrachten
-        const lastAssistantMsg = [...sessionHistoryTrimmed]
-          .reverse()
-          .find((h) => h.role === 'assistant');
-
-        const previousQuestion = lastAssistantMsg?.content?.trim() || null;
-
-        if (previousQuestion) {
-          let matchedItem: any | null = null;
-
-          if (answeredFindingId && Array.isArray(ctx.interview)) {
-            matchedItem =
-              ctx.interview.find(
-                (item: any) => item.id === answeredFindingId,
-              ) ?? null;
-          }
-
-          const answerJson = {
-            kind: 'interview_chat_v1',
-
-            // Leitfrage-Mapping (für spätere Auswertung)
-            finding_id: answeredFindingId,
-            theme: matchedItem?.theme ?? null,
-            sheet_id: matchedItem?.sheet_id ?? null,
-            sheet_name: matchedItem?.sheet_name ?? null,
-
-            // Tatsächliches Q&A-Paar in diesem Turn
-            llm_question: previousQuestion,
-            user_answer: userAnswer,
-
-            status,
-          };
-
-          await saveAnswer({
-            interviewId,
-            answerJson,
-          });
-
-          console.log('[INTERVIEW_CHAT] Antwort gespeichert:', answerJson);
-        } else {
-          console.log(
-            '[INTERVIEW_CHAT] Keine previousQuestion gefunden → nichts gespeichert.',
-          );
-        }
-      } else {
-        console.log(
-          '[INTERVIEW_CHAT] mode != answer (',
-          mode,
-          ') → keine Antwort gespeichert.',
-        );
-      }
-    } catch (saveErr) {
-      console.error(
-        '[INTERVIEW_CHAT] Fehler beim Speichern der Antwort:',
-        saveErr,
-      );
-    }
-
-    //
-    // 10) Meta-Infos zur NÄCHSTEN Frage (für Badge im Frontend)
-    //
-    let nextQuestionMeta: {
-      finding_id: string | null;
-      theme: string | null;
-      sheet_id: string | null;
-      sheet_name: string | null;
-    } | null = null;
-
-    try {
-      if (Array.isArray(ctx.interview) && nextQuestion) {
-        // Heuristik: das Finding mit derselben finding_id wie im LLM-Result
-        const nextFindingId =
-          typeof (llmResult as any).finding_id === 'string'
-            ? (llmResult as any).finding_id
-            : null;
-
-        let matchedNext: any | null = null;
-
-        if (nextFindingId) {
-          matchedNext =
-            ctx.interview.find((item: any) => item.id === nextFindingId) ??
-            null;
-        }
-
-        if (matchedNext) {
-          nextQuestionMeta = {
-            finding_id: matchedNext.id ?? nextFindingId,
-            theme: matchedNext.theme ?? null,
-            sheet_id: matchedNext.sheet_id ?? null,
-            sheet_name: matchedNext.sheet_name ?? null,
-          };
-        }
-      }
-    } catch (metaErr) {
-      console.warn(
-        '[INTERVIEW_CHAT] Konnte Meta-Infos zur nächsten Frage nicht bestimmen:',
-        metaErr,
-      );
-    }
-
-    // 11) Antwort an das Frontend
-    return res.json({
-      answer,
-      question: nextQuestion,
-      status,
-      meta: nextQuestionMeta ?? null,
-      raw: llmResult,
-    });
-  } catch (e: any) {
-    console.error('Unerwarteter Fehler in POST /api/interview/chat:', e);
-    return res.status(500).json({
-      error: 'internal',
-      message: e?.message ?? 'Unbekannter Fehler',
-    });
-  }
-});
-
 // Upload-Konfiguration
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -809,44 +428,25 @@ app.get('/api/health', (_req, res) => {
 // Kontext für einen bestimmten Benutzer (Lean-Variante)
 app.get('/api/interviews/context-for-user', async (req, res) => {
   try {
-    const userIdentifier = req.query.user;
-    if (!userIdentifier || typeof userIdentifier !== 'string') {
+    const userParam = req.query.user;
+    const userIdentifier = resolveUserIdentifier({ user: userParam });
+
+    if (!userIdentifier) {
       return res.status(400).json({ error: 'user missing' });
     }
 
-    // User lookup
-    const { data: userRow } = await supabase
-      .from('users')
-      .select('id')
-      .eq('username', userIdentifier)
-      .maybeSingle();
+    const result = await loadContextForUserIdentifier(userIdentifier);
 
-    if (!userRow) {
-      return res.status(404).json({ error: 'user not found' });
+    if (!result) {
+      // Fall 1: User unbekannt
+      // Fall 2: User bekannt, aber kein aktives Interview
+      // Aus API-Sicht beides "kein Kontext verfügbar"
+      return res.status(404).json({ error: 'no active interview or user' });
     }
-
-    const userId = userRow.id;
-
-    // Aktivstes Interview holen
-    const { data: interviewRow } = await supabase
-      .from('interviews')
-      .select('id,status')
-      .eq('user_id', userId)
-      .eq('status', 'started')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (!interviewRow) {
-      return res.status(404).json({ error: 'no active interview' });
-    }
-
-    // Lean-Kontext laden (enthält theme!)
-    const lean = await loadLeanInterviewContext(interviewRow.id);
 
     return res.json({
-      brief: lean.brief,
-      interview: lean.interview,   // <<–– das ist wichtig!
+      brief: result.context.brief,
+      interview: result.context.interview,
     });
   } catch (err) {
     console.error(err);
@@ -1645,7 +1245,7 @@ app.get(
         });
       }
 
-      const ctx = await loadLeanInterviewContext(interviewId);
+      const ctx = await loadContextForInterviewId(interviewId);
       res.json(ctx);
     } catch (e: any) {
       console.error('Fehler in GET /api/interviews/.../context:', e);
