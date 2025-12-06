@@ -14,6 +14,8 @@ const ROOT = path.resolve(__dirname, '..', '..'); // Projektdach
 // .env im Repo-Root laden (hier liegen SUPABASE_URL, FLOWISE_TARGET etc.)
 dotenv.config({ path: path.join(ROOT, '.env') });
 
+const API_PORT = Number(process.env.PORT ?? process.env.BRIEF_API_PORT ?? 4000);
+
 // ----------------------------------------
 // Flowise-Target (interner Port 4000)
 // ----------------------------------------
@@ -59,14 +61,6 @@ import {
 // ----------------------------------------
 const app = express();
 
-const API_PORT = Number(process.env.PORT ?? process.env.BRIEF_API_PORT ?? 4000);
-
-app.use(chatInterviewRouter);
-
-const FALLBACK_DOMAIN_ID =
-  process.env.FALLBACK_DOMAIN_ID ?? '00000000-0000-0000-0000-000000000000';
-console.info('FALLBACK_DOMAIN_ID ist (' + FALLBACK_DOMAIN_ID + ').');
-
 // Middleware – CORS global erlauben + JSON Body Parser
 app.use(
   cors({
@@ -75,6 +69,12 @@ app.use(
 );
 app.use(express.json({ limit: '3mb' }));
 
+app.use(chatInterviewRouter);
+
+
+const FALLBACK_DOMAIN_ID =
+  process.env.FALLBACK_DOMAIN_ID ?? '00000000-0000-0000-0000-000000000000';
+console.info('FALLBACK_DOMAIN_ID ist (' + FALLBACK_DOMAIN_ID + ').');
 
 
 // ---- Flowise Chat ----
