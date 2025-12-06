@@ -310,8 +310,8 @@ export async function runInterviewTurn(
   // ===== OPENAI AUFRUF =================================================
   const completion = await openai.chat.completions.create({
     model: OPENAI_MODEL,
-    temperature: 0.4,
-    top_p: 0.9,
+    temperature: 1.2,
+    top_p: 0.95,
     max_tokens: 800,
     response_format: { type: 'json_object' },
     messages: [
