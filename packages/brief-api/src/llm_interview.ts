@@ -106,9 +106,10 @@ Bedeutung:
   Wichtig:
   * id = eindeutige interne ID des Findings (diese nutzt du für finding_id und next_finding_id).
   * score_1_5:
-      1 oder null = größte Lücken
-      2–3       = deutliche Unschärfen
-      4–5       = geringere Priorität
+      null     = noch NICHT bewertet → größte Lücke im System
+      1        = sehr geringe Ausprägung / fast nichts beschrieben
+      2–3      = deutliche Unschärfen
+      4–5      = geringere Priorität
   * evidence = Textstellen, die bereits Antworten liefern könnten
   * open_questions = sinnvolle Rückfragen
   * status = kann genutzt werden, um beantwortete Fragen niedrig zu priorisieren
@@ -125,10 +126,26 @@ WIE DU DEN KONTEXT NUTZT
 
 Arbeite in folgender Reihenfolge:
 
-1) Priorisierung nach score_1_5  
-   Höchste Priorität: score null oder 1  
-   Dann: score 2–3  
-   Niedrig: score 4–5 (nur bei echten Unklarheiten)
+1) STRIKTE Priorisierung nach score_1_5
+
+   1.1 Zuerst Findings mit score_1_5 = null  
+       - Das sind Findings ohne Bewertung.  
+       - Solange es mindestens EIN Finding mit score_1_5 = null gibt,
+         MUSST du eines davon auswählen.  
+       - Wähle aus diesen null-Findings dasjenige, das noch nicht in der
+         history der assistant-Rollen vorkommt und nicht den Status "answered" hat.
+
+   1.2 Wenn es KEINE Findings mit score_1_5 = null mehr gibt:
+       - Nächste Priorität: Findings mit score_1_5 = 1
+       - Danach: Findings mit score_1_5 = 2–3
+       - Niedrigste Priorität: Findings mit score_1_5 = 4–5
+         (nur bei echten Unklarheiten oder wenn keine anderen Lücken mehr existieren).
+
+   1.3 Zusätzlich:
+       - Wenn du gerade mehrere Fragen zu demselben Thema/theme gestellt hast
+         und es in anderen Themen noch Findings mit score_1_5 = null gibt,
+         wechsle bewusst zu einem anderen Thema mit score_1_5 = null,
+         statt im bisherigen Thema zu bleiben.
 
 2) Leitfrage auswählen  
    Wähle das am höchsten priorisierte Finding,
@@ -156,6 +173,7 @@ MODES
 mode = "start":
 - Ignoriere last_user_message vollständig.
 - Stelle die wichtigeste ungeklärte Frage aus interview[].
+– Setze finding_id auf die ID des Findings, zu dem deine neue Frage im Feld “question” gehört.
 - answer löschen.
 
 mode = "answer" oder mode = unbekannt:
@@ -186,8 +204,13 @@ Regeln:
 - Stelle IMMER genau eine Frage in "question".
 - Wiederhole im Feld "question" keine Inhalte aus "answer".
 - finding_id:
-    - Nur im Modus "answer" befüllen.
-    - Setze sie auf die ID des Findings, zu dem deine letzte Assistant-Frage gehört.
+    – Im Modus “answer”:
+    Setze finding_id auf die ID des Findings, zu dem die letzte Assistant-Frage gehörte (also das Finding, auf das sich last_user_message bezieht).
+    – Im Modus “start”:
+    Setze finding_id auf die ID des Findings, zu dem deine neue Frage im Feld “question” gehört.
+    – Im Modus “user_question”:
+    Wenn du danach wieder eine Interviewfrage stellst, setze finding_id auf die ID dieses Findings.
+    Wenn du ausnahmsweise keine Interviewfrage stellst, setze finding_id = null.
 - next_finding_id:
     - Setze sie immer auf die ID des Findings, zu dem die NEUE Frage gehört.
 - Wenn ausreichend Klarheit herrscht: status = "[STOP] Struktur ausreichend geklärt."
