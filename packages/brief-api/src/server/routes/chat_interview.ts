@@ -20,8 +20,14 @@ import {
   loadActiveInterviewForUser,
   loadLeanContext,
   loadAnswers,
-  buildChatHistoryFromAnswers,
 } from '../core/interviews';
+
+import {
+  normalizeSessionHistory,
+  trimHistory,
+  buildChatHistoryFromAnswers,
+  combineHistories,
+} from '../core/history';
 
 import { saveAnswer } from '../../../../brief-parser/src/save_answer';
 
@@ -133,46 +139,9 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
     // 3) Session-History (nur aktueller Browser) normalisieren
     //
     const rawHistory = Array.isArray(history) ? history : [];
-
-    const normalizedSessionHistory = rawHistory
-      .map((item: any, idx: number) => {
-        if (!item || typeof item.content !== 'string') return null;
-        const content = item.content;
-        const role = item.role;
-
-        if (role === 'user' || role === 'userMessage') {
-          return { role: 'userMessage' as const, content };
-        }
-        if (role === 'assistant' || role === 'apiMessage') {
-          return { role: 'apiMessage' as const, content };
-        }
-
-        console.warn(
-          '[INTERVIEW_CHAT] History-Item mit unbekannter Rolle übersprungen',
-          { idx, role },
-        );
-        return null;
-      })
-      .filter(
-        (
-          x,
-        ): x is { role: 'userMessage' | 'apiMessage'; content: string } =>
-          x !== null,
-      );
-
-    // Session-History im LLM-Format
-    const sessionHistory: ChatHistoryEntry[] = normalizedSessionHistory.map(
-      (h) => ({
-        role: h.role === 'apiMessage' ? 'assistant' : 'user',
-        content: h.content,
-      }),
-    );
-
+    const sessionHistory: ChatHistoryEntry[] = normalizeSessionHistory(rawHistory);
     const MAX_SESSION_HISTORY = 20;
-    const sessionHistoryTrimmed =
-      sessionHistory.length > MAX_SESSION_HISTORY
-        ? sessionHistory.slice(sessionHistory.length - MAX_SESSION_HISTORY)
-        : sessionHistory;
+    const sessionHistoryTrimmed = trimHistory(sessionHistory, MAX_SESSION_HISTORY);
 
     //
     // 4) DB-History aus answers (Kontext über Sessions hinweg)
@@ -180,14 +149,7 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
     let dbHistory: ChatHistoryEntry[] = [];
     try {
       const answerRows = await loadAnswers(interviewId);
-      const coreHistory = buildChatHistoryFromAnswers(answerRows);
-
-      dbHistory = coreHistory
-        .map((m) => ({
-          role: m.role as 'assistant' | 'user',
-          content: typeof m.content === 'string' ? m.content.trim() : '',
-        }))
-        .filter((m) => m.content.length > 0);
+      dbHistory = buildChatHistoryFromAnswers(answerRows);
     } catch (err) {
       console.warn(
         '[INTERVIEW_CHAT] Unerwarteter Fehler beim Laden der DB-History:',
@@ -207,8 +169,8 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
     ) {
       mode = clientMode;
     } else {
-      const hasAssistantTurn = normalizedSessionHistory.some(
-        (h) => h.role === 'apiMessage',
+      const hasAssistantTurn = sessionHistory.some(
+        (h) => h.role === 'assistant',
       );
 
       if (!hasAssistantTurn) {
@@ -225,23 +187,19 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
     }
 
     console.log('[INTERVIEW_CHAT] mode =', mode, {
-      sessionHistoryLen: normalizedSessionHistory.length,
+      sessionHistoryLen: sessionHistory.length,
       dbHistoryLen: dbHistory.length,
     });
 
     //
     // 6) LLM-History = DB-History + Session-History (nur Kontext)
     //
-    const combinedHistory: ChatHistoryEntry[] = [
-      ...dbHistory,
-      ...sessionHistoryTrimmed,
-    ];
-
     const MAX_TOTAL_HISTORY = 40;
-    const llmHistoryTrimmed =
-      combinedHistory.length > MAX_TOTAL_HISTORY
-        ? combinedHistory.slice(combinedHistory.length - MAX_TOTAL_HISTORY)
-        : combinedHistory;
+    const llmHistoryTrimmed = combineHistories(
+      dbHistory,
+      sessionHistoryTrimmed,
+      MAX_TOTAL_HISTORY,
+    );
 
     // 7) Interview-Kontext laden (Lean)
     const ctx = await loadLeanContext(interviewId);
@@ -259,6 +217,7 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
       question: nextQuestion = '',
       status = 'continue',
       finding_id: answeredFindingId = null,
+      next_finding_id: nextFindingId = null,
     } = llmResult as any;
 
     // ------------------------------------------------------
@@ -337,27 +296,25 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
 
     try {
       if (Array.isArray(ctx.interview) && nextQuestion) {
-        // Heuristik: das Finding mit derselben finding_id wie im LLM-Result
-        const nextFindingId =
-          typeof (llmResult as any).next_finding_id === 'string'
-            ? (llmResult as any).next_finding_id
+        const effectiveNextFindingId =
+          typeof nextFindingId === 'string'
+            ? nextFindingId
             : null;
 
-        let matchedNext: any | null = null;
+        if (effectiveNextFindingId) {
+          const matchedNext =
+            ctx.interview.find(
+              (item: any) => item.id === effectiveNextFindingId,
+            ) ?? null;
 
-        if (nextFindingId) {
-          matchedNext =
-            ctx.interview.find((item: any) => item.id === nextFindingId) ??
-            null;
-        }
-
-        if (matchedNext) {
-          nextQuestionMeta = {
-            finding_id: matchedNext.id ?? nextFindingId,
-            theme: matchedNext.theme ?? null,
-            sheet_id: matchedNext.sheet_id ?? null,
-            sheet_name: matchedNext.sheet_name ?? null,
-          };
+          if (matchedNext) {
+            nextQuestionMeta = {
+              finding_id: matchedNext.id ?? effectiveNextFindingId,
+              theme: matchedNext.theme ?? null,
+              sheet_id: matchedNext.sheet_id ?? null,
+              sheet_name: matchedNext.sheet_name ?? null,
+            };
+          }
         }
       }
     } catch (metaErr) {
