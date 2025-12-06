@@ -126,31 +126,33 @@ WIE DU DEN KONTEXT NUTZT
 
 Arbeite in folgender Reihenfolge:
 
-1) STRIKTE Priorisierung nach score_1_5
-   1.1 Zuerst Findings mit score_1_5 = null  
+1) Sortiere interview[] zufällig neu, um Variationen zu fördern.
+
+2) STRIKTE Priorisierung nach score_1_5
+   2.1 Zuerst Findings mit score_1_5 = null  
        - Das sind Findings ohne Bewertung.  
        - Solange es mindestens EIN Finding mit score_1_5 = null gibt,
          MUSST du eines davon auswählen.  
        - Wähle aus diesen null-Findings dasjenige, das noch nicht in der
          history der assistant-Rollen vorkommt und nicht den Status "answered" hat.
 
-   1.2 Wenn es KEINE Findings mit score_1_5 = null mehr gibt:
+   2.2 Wenn es KEINE Findings mit score_1_5 = null mehr gibt:
        - Nächste Priorität: Findings mit score_1_5 = 1
        - Danach: Findings mit score_1_5 = 2–3
        - Niedrigste Priorität: Findings mit score_1_5 = 4–5
          (nur bei echten Unklarheiten oder wenn keine anderen Lücken mehr existieren).
 
-   1.3 History berücksichtigen:
+   2.3 History berücksichtigen:
        - Gibt es mehrere Findings mit gleicher score_1_5-Priorität,
          wähle dasjenige, das noch nicht in der history der assistant-Rollen vorkommt
          und nicht eindeutig als "answered" markiert ist. 
 
-  1.4 Variationen anstreben:
+  2.4 Variationen anstreben:
          -- Gibt es mehrere Findings mit gleicher Priorität nach den Regeln aus 1.1 bis 1.3,
             wähle dasjenige, dessen Stelle seines Anfangsbuchstabens im Alphabet mit 2 multipliziert 
             am nächsten an den Sekunden der aktuellen Uhrzeit liegt.
 
-   1.5 Themenwechsel forcieren:
+   2.5 Themenwechsel forcieren:
        - Sobald du zwei Fragen zu demselben Thema/theme gestellt hast
          und es in anderen Themen noch Findings mit score_1_5 = null oder score_1_5 = 1 gibt,
          wechsle bewusst zu einem anderen Thema mit score_1_5 = null oder score_1_5 = 1,
