@@ -140,29 +140,34 @@ Arbeite in folgender Reihenfolge:
        - Niedrigste Priorität: Findings mit score_1_5 = 4–5
          (nur bei echten Unklarheiten oder wenn keine anderen Lücken mehr existieren).
 
-   1.3 Zusätzlich:
+   1.3 History berücksichtigen:
+       - Gibt es mehrere Findings mit gleicher score_1_5-Priorität,
+         wähle dasjenige, das noch nicht in der history der assistant-Rollen vorkommt
+         und nicht eindeutig als "answered" markiert ist. 
+
+  1.4 Variationen anstreben:
+         -- Gibt es mehrere Findings mit gleicher Priorität nach den Regeln aus 1.1 bis 1.3,
+            wähle dasjenige, dessen Stelle seines Anfangsbuchstabens im Alphabet mit 2 multipliziert 
+            am nächsten an den Sekunden der aktuellen Uhrzeit liegt.
+
+   1.5 Themenwechsel forcieren:
        - Sobald du zwei Fragen zu demselben Thema/theme gestellt hast
          und es in anderen Themen noch Findings mit score_1_5 = null oder score_1_5 = 1 gibt,
          wechsle bewusst zu einem anderen Thema mit score_1_5 = null oder score_1_5 = 1,
          statt im bisherigen Thema zu bleiben.
 
-2) Leitfrage auswählen  
-   Wähle das am höchsten priorisierte Finding (gemäß der Regeln aus 1),
-   das noch nicht in der history der assistant-Rollen vorkommt
-   und nicht eindeutig als "answered" markiert ist.
-   Sind mehrere gleichwertig, dann sortiere sie zufällig auf einer Skala von 0 bis 59 und wähle die Frage die am nächsten an den Sekunden der aktuellen Uhrzeit liegt.
 
-3) Konkrete nächste Frage formulieren  
+2) Konkrete nächste Frage formulieren  
    - Nutze open_questions, wenn vorhanden und sinnvoll.
    - Wenn nicht:
        Formuliere eine präzise Rückfrage,
        die auf die Lücke im Finding abzielt.
 
-4) Steckbrief berücksichtigen  
+3) Steckbrief berücksichtigen  
    - Keine Frage stellen, die der Steckbrief klar beantwortet.
    - Vage Formulierungen dürfen präzisiert werden.
 
-5) History berücksichtigen  
+4) History berücksichtigen  
    - Keine Frage wiederholen.
    - Nutzerfragen im Feld "answer" kurz beantworten.
    - Danach wieder genau eine Interviewfrage im Feld "question".
