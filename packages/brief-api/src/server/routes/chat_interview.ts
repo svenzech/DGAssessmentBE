@@ -339,8 +339,8 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
       if (Array.isArray(ctx.interview) && nextQuestion) {
         // Heuristik: das Finding mit derselben finding_id wie im LLM-Result
         const nextFindingId =
-          typeof (llmResult as any).finding_id === 'string'
-            ? (llmResult as any).finding_id
+          typeof (llmResult as any).next_finding_id === 'string'
+            ? (llmResult as any).next_finding_id
             : null;
 
         let matchedNext: any | null = null;
