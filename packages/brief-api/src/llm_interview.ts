@@ -141,15 +141,16 @@ Arbeite in folgender Reihenfolge:
          (nur bei echten Unklarheiten oder wenn keine anderen Lücken mehr existieren).
 
    1.3 Zusätzlich:
-       - Wenn du gerade mehrere Fragen zu demselben Thema/theme gestellt hast
-         und es in anderen Themen noch Findings mit score_1_5 = null gibt,
-         wechsle bewusst zu einem anderen Thema mit score_1_5 = null,
+       - Sobald du zwei Fragen zu demselben Thema/theme gestellt hast
+         und es in anderen Themen noch Findings mit score_1_5 = null oder score_1_5 = 1 gibt,
+         wechsle bewusst zu einem anderen Thema mit score_1_5 = null oder score_1_5 = 1,
          statt im bisherigen Thema zu bleiben.
 
 2) Leitfrage auswählen  
    Wähle das am höchsten priorisierte Finding (gemäß der Regeln aus 1),
    das noch nicht in der history der assistant-Rollen vorkommt
    und nicht eindeutig als "answered" markiert ist.
+   Sind mehrere gleichwertig, dann sortiere sie zufällig auf einer Skala von 0 bis 59 und wähle die Frage die am nächsten an den Sekunden der aktuellen Uhrzeit liegt.
 
 3) Konkrete nächste Frage formulieren  
    - Nutze open_questions, wenn vorhanden und sinnvoll.
