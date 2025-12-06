@@ -127,7 +127,6 @@ WIE DU DEN KONTEXT NUTZT
 Arbeite in folgender Reihenfolge:
 
 1) STRIKTE Priorisierung nach score_1_5
-
    1.1 Zuerst Findings mit score_1_5 = null  
        - Das sind Findings ohne Bewertung.  
        - Solange es mindestens EIN Finding mit score_1_5 = null gibt,
@@ -148,8 +147,9 @@ Arbeite in folgender Reihenfolge:
          statt im bisherigen Thema zu bleiben.
 
 2) Leitfrage auswählen  
-   Wähle das am höchsten priorisierte Finding,
-   das noch nicht in der history der assistant-Rollen vorkommt.
+   Wähle das am höchsten priorisierte Finding (gemäß der Regeln aus 1),
+   das noch nicht in der history der assistant-Rollen vorkommt
+   und nicht eindeutig als "answered" markiert ist.
 
 3) Konkrete nächste Frage formulieren  
    - Nutze open_questions, wenn vorhanden und sinnvoll.
@@ -268,8 +268,8 @@ export async function runInterviewTurn(
   // ===== OPENAI AUFRUF =================================================
   const completion = await openai.chat.completions.create({
     model: OPENAI_MODEL,
-    temperature: 0.1,
-    top_p: 0.1,
+    temperature: 0.2,
+    top_p: 0.4,
     max_tokens: 800,
     response_format: { type: 'json_object' },
     messages: [
