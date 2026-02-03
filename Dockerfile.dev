@@ -1,0 +1,21 @@
+# Dev image for backend (pnpm + tsx)
+FROM node:20-alpine
+
+WORKDIR /app
+
+# pnpm via corepack
+RUN corepack enable
+
+# Install deps early for better cache
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/brief-api/package.json packages/brief-api/package.json
+COPY packages/brief-parser/package.json packages/brief-parser/package.json
+
+RUN pnpm install
+
+# Copy source
+COPY . .
+
+EXPOSE 4000
+
+CMD ["pnpm", "-C", "packages/brief-api", "dev"]
