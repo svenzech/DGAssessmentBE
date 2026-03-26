@@ -1,15 +1,6 @@
 // packages/brief-api/src/llm_upload_parser.ts
 
-import OpenAI from 'openai';
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-
-if (!OPENAI_API_KEY) {
-  throw new Error('OPENAI_API_KEY is not set in environment variables');
-}
-
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+import { createChatCompletion, defaultLlmModel } from './llm/provider';
 
 /**
  * Ergebnis, das das LLM liefern soll.
@@ -241,8 +232,8 @@ export async function classifyAndExtractUpload(
     ];
   }
 
-    const response = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
+    const response = await createChatCompletion({
+    model: defaultLlmModel,
     temperature: 0,
     messages: [
       { role: 'system', content: SYSTEM_PROMPT },

@@ -94,7 +94,7 @@ export async function loadLeanContext(
   const briefId = interviewRow.brief_id;
 
   // Brief + Findings gemeinsam laden
-  const [brief, findings] = await Promise.all([
+  const [brief, findingsBase] = await Promise.all([
     supabase
       .from('briefs')
       .select('id, title, raw_markdown')
@@ -103,37 +103,46 @@ export async function loadLeanContext(
 
     supabase
       .from('brief_sheet_findings')
-      .select(
-        `
-        id,
-        finding_json,
-        sheet:overleitung_sheets (
-          id,
-          name,
-          theme
-        ),
-        question:sheet_questions (
-          id,
-          question,
-          code,
-          checkpoints
-        )
-      `,
-      )
+      .select('id, sheet_id, question_id, finding_json')
       .eq('brief_id', briefId),
   ]);
 
   if (brief.error) throw brief.error;
-  if (findings.error) throw findings.error;
+  if (findingsBase.error) throw findingsBase.error;
+
+  const rows = findingsBase.data ?? [];
+  const sheetIds = Array.from(new Set(rows.map((r: any) => r.sheet_id).filter(Boolean)));
+  const questionIds = Array.from(new Set(rows.map((r: any) => r.question_id).filter(Boolean)));
+
+  const [sheetRows, questionRows] = await Promise.all([
+    sheetIds.length > 0
+      ? supabase
+          .from('overleitung_sheets')
+          .select('id, name, theme')
+          .in('id', sheetIds)
+      : Promise.resolve({ data: [], error: null }),
+    questionIds.length > 0
+      ? supabase
+          .from('sheet_questions')
+          .select('id, question, code, checkpoints')
+          .in('id', questionIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (sheetRows.error) throw sheetRows.error;
+  if (questionRows.error) throw questionRows.error;
+
+  const sheetById = new Map((sheetRows.data ?? []).map((s: any) => [s.id, s]));
+  const questionById = new Map((questionRows.data ?? []).map((q: any) => [q.id, q]));
 
   const items: LeanFinding[] = [];
 
-  for (const row of findings.data ?? []) {
-    // Supabase gibt Relationen oft als Array zurück → erstes Element nehmen
-    const sheetRel = Array.isArray(row.sheet) ? row.sheet[0] : row.sheet;
-    const questionRel = Array.isArray(row.question)
-      ? row.question[0]
-      : row.question;
+  for (const row of rows) {
+    const sheetRel = sheetById.get(row.sheet_id);
+    const questionRel = questionById.get(row.question_id);
+    if (!sheetRel || !questionRel) {
+      continue;
+    }
 
     const fj = row.finding_json ?? {};
     const inner = fj.finding ?? fj;

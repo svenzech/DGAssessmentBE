@@ -3,8 +3,8 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import dotenv from 'dotenv'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { createClient, SupabaseClient } from '@supabase/supabase-js'
-import OpenAI from 'openai'
+import { db as sb } from './db/provider';
+import { createChatCompletion, defaultLlmModel } from './llm/provider';
 
 // Aggregator wiederverwenden
 import { aggregateBriefSheetEvidence } from './aggregate_brief_sheet'
@@ -17,28 +17,10 @@ const read = (rel: string) => fs.readFileSync(path.join(PKG_ROOT, rel), 'utf8')
 
 dotenv.config({ path: path.join(PKG_ROOT, '.env') })
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('Missing env vars: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
-  process.exit(1);
-}
-
-const sb: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-});
+const MODEL = defaultLlmModel;
 
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini-2025-04-14'
-
-if (!OPENAI_API_KEY) {
-  console.error('Missing env var: OPENAI_API_KEY')
-  process.exit(1)
-}
-
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY })
 
 // Optional eigenes Prompt-Template für Scorecards
 const SCORECARD_PROMPT = read('prompts/brief_scorecard.de.txt')
@@ -55,7 +37,7 @@ function sha256(s: string) {
 async function callScorecardLLM(aggregateJson: any) {
   const promptHash = sha256(SCORECARD_PROMPT).slice(0, 16)
 
-  const resp = await openai.chat.completions.create({
+  const resp = await createChatCompletion({
     model: MODEL,
     temperature: 0.1,
     messages: [

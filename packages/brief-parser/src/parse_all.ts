@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { createClient } from '@supabase/supabase-js';
+import { db as sb } from './db/provider';
 import { parseBriefForSheet } from './parse_brief';
 
 // Pfad zum Package
@@ -11,19 +11,6 @@ const PKG_ROOT = path.resolve(__dirname, '..');
 // .env laden
 dotenv.config({ path: path.join(PKG_ROOT, '.env') });
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('Missing env vars: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
-  process.exit(1);
-}
-
-//console.log('Verbinde mit Supabase URL:', SUPABASE_URL);
-
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-});
 
 async function runAll() {
   // 1) Alle aktiven Briefs holen

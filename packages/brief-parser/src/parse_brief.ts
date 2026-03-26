@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import Ajv from 'ajv';
-import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
+import { db as sb } from './db/provider';
+import { createChatCompletion, defaultLlmModel } from './llm/provider';
 import dotenv from 'dotenv';
 import { fileURLToPath, pathToFileURL } from 'url';
 
@@ -15,20 +15,7 @@ const read = (rel: string) => fs.readFileSync(path.join(PKG_ROOT, rel), 'utf8');
 // === .env aus dem Package-Ordner laden ===
 dotenv.config({ path: path.join(PKG_ROOT, '.env') });
 
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY!;
-const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini-2025-04-14';
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !OPENAI_API_KEY) {
-  console.error('Missing env vars: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / OPENAI_API_KEY');
-  process.exit(1);
-}
-
-const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-});
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+const MODEL = defaultLlmModel;
 
 // Prompt-Template und Schema laden
 const PROMPT = read('prompts/brief_parser.de.txt'); // generischer Prompt
@@ -44,7 +31,7 @@ function sha256(s: string) {
 async function callLLM(briefText: string, questionsJson: string) {
   const promptHash = sha256(PROMPT).slice(0, 16);
 
-  const resp = await openai.chat.completions.create({
+  const resp = await createChatCompletion({
     model: MODEL,
     temperature: 0.1,
     messages: [
@@ -120,7 +107,7 @@ export async function parseBriefForSheet(briefId: string, sheetId: string): Prom
   }
 
   // 4) Fragen für das LLM vorbereiten
-  const questionsForLLM = questions.map((q) => ({
+  const questionsForLLM = questions.map((q: any) => ({
     code: q.code,
     question: q.question,
     checkpoints: q.checkpoints || [],
@@ -145,7 +132,7 @@ export async function parseBriefForSheet(briefId: string, sheetId: string): Prom
       continue;
     }
 
-    const q = questions.find((qq) => qq.code === code);
+    const q = questions.find((qq: any) => qq.code === code);
     if (!q) {
       console.warn('Kein passender question_code im Sheet für:', code);
       continue;

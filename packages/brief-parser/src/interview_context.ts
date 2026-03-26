@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'node:path';
 import { fileURLToPath } from 'url';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { db as sb } from './db/provider';
 
 // ==== Pfade & .env laden ====
 
@@ -9,17 +9,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, '..');
 
 dotenv.config({ path: path.join(PKG_ROOT, '.env') });
-
-const SUPABASE_URL = process.env.SUPABASE_URL!;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  throw new Error('Missing env vars: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY');
-}
-
-const sb: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { persistSession: false },
-});
 
 // ==== Basis-Typen ====
 
@@ -161,35 +150,43 @@ async function loadFindingsForBrief(
 ): Promise<FindingForInterview[]> {
   const { data, error } = await sb
     .from('brief_sheet_findings')
-    .select(
-      `
-      id,
-      brief_id,
-      sheet_id,
-      question_id,
-      finding_json,
-      sheet:overleitung_sheets (
-        id,
-        name,
-        theme
-      ),
-      question:sheet_questions (
-        id,
-        code,
-        question,
-        checkpoints
-      )
-    `,
-    )
+    .select('id, sheet_id, question_id, finding_json')
     .eq('brief_id', briefId);
 
   if (error) throw error;
   if (!data || data.length === 0) return [];
 
+  const sheetIds = Array.from(new Set((data as any[]).map((r) => r.sheet_id).filter(Boolean)));
+  const questionIds = Array.from(new Set((data as any[]).map((r) => r.question_id).filter(Boolean)));
+
+  const [sheetsRes, questionsRes] = await Promise.all([
+    sheetIds.length > 0
+      ? sb
+          .from('overleitung_sheets')
+          .select('id, name, theme')
+          .in('id', sheetIds)
+      : Promise.resolve({ data: [], error: null }),
+    questionIds.length > 0
+      ? sb
+          .from('sheet_questions')
+          .select('id, code, question, checkpoints')
+          .in('id', questionIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (sheetsRes.error) throw sheetsRes.error;
+  if (questionsRes.error) throw questionsRes.error;
+
+  const sheetById = new Map((sheetsRes.data ?? []).map((s: any) => [s.id, s]));
+  const questionById = new Map((questionsRes.data ?? []).map((q: any) => [q.id, q]));
+
   const result: FindingForInterview[] = [];
 
   for (const row of data as any[]) {
-    if (!row.sheet || !row.question) {
+    const sheet = sheetById.get(row.sheet_id) as any;
+    const question = questionById.get(row.question_id) as any;
+
+    if (!sheet || !question) {
       console.warn(
         'Warnung: Finding ohne Sheet oder Question, wird übersprungen:',
         row.id,
@@ -197,31 +194,15 @@ async function loadFindingsForBrief(
       continue;
     }
 
-    // Safety-Check – FK-Konsistenz
-    if (row.question.id !== row.question_id) {
-      console.warn(
-        'Inkonsistenter FK question_id vs. question.id bei Finding',
-        row.id,
-        row.question_id,
-        row.question.id,
-      );
-      continue;
-    }
-
-    const theme =
-      row.sheet && typeof row.sheet.theme === 'string'
-        ? row.sheet.theme
-        : null;
-
     result.push({
       id: row.id,
-      sheet_id: row.sheet.id,
-      sheet_name: row.sheet.name,
-      theme,
-      question_id: row.question.id,
-      question_code: row.question.code,
-      question: row.question.question,
-      checkpoints: row.question.checkpoints || [],
+      sheet_id: sheet.id,
+      sheet_name: sheet.name,
+      theme: typeof sheet.theme === 'string' ? sheet.theme : null,
+      question_id: question.id,
+      question_code: question.code,
+      question: question.question,
+      checkpoints: question.checkpoints || [],
       finding_json: row.finding_json,
     });
   }

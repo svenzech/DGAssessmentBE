@@ -3,16 +3,7 @@
 // Zentrale LLM-Logik für das Interview (runInterviewTurn).
 // Funktional identisch zu llm_interview.ts, nur verschoben nach core/.
 
-import OpenAI from 'openai';
-
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-
-if (!OPENAI_API_KEY) {
-  throw new Error('OPENAI_API_KEY is not set in environment variables');
-}
-
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+import { createChatCompletion, defaultLlmModel } from '../../llm/provider';
 
 export type InterviewMode = 'start' | 'answer' | 'user_question';
 
@@ -309,8 +300,8 @@ export async function runInterviewTurn(
     console.warn('[INTERVIEW_LLM] Konnte Input nicht loggen:', err);
   }
 
-  const completion = await openai.chat.completions.create({
-    model: OPENAI_MODEL,
+  const completion = await createChatCompletion({
+    model: defaultLlmModel,
     temperature: 0.5,
     top_p: 0.95,
     max_tokens: 800,

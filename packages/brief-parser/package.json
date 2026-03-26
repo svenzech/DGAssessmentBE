@@ -19,7 +19,9 @@
     "@supabase/supabase-js": "^2.45.0",
     "ajv": "^8.17.1",
     "dotenv": "^16.4.5",
-    "openai": "^4.55.0"
+    "openai": "^4.55.0",
+    "pg": "^8.13.3",
+    "mssql": "^11.0.1"
   },
   "devDependencies": {
     "tsx": "^4.16.0",
