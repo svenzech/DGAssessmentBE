@@ -97,13 +97,20 @@ class PostgresAdapter implements SqlAdapter {
   private async ensureInitialized() {
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        await this.ensurePool();
-        await ensureSchema('postgres', async (sql) => {
-          await this.pool.query(sql);
-        });
-        await ensureSeedData('postgres', async (sql) => {
-          await this.pool.query(sql);
-        });
+        try {
+          await this.ensurePool();
+          console.info('[db] postgres bootstrap start');
+          await ensureSchema('postgres', async (sql) => {
+            await this.pool.query(sql);
+          });
+          await ensureSeedData('postgres', async (sql) => {
+            await this.pool.query(sql);
+          });
+          console.info('[db] postgres bootstrap done');
+        } catch (error) {
+          this.initPromise = null;
+          throw error;
+        }
       })();
     }
     await this.initPromise;
@@ -156,15 +163,22 @@ class AzureSqlAdapter implements SqlAdapter {
   private async ensureInitialized() {
     if (!this.initPromise) {
       this.initPromise = (async () => {
-        await this.ensureConnected();
-        await ensureSchema('azure_sql', async (sql) => {
-          const req = this.pool.request();
-          await req.query(sql);
-        });
-        await ensureSeedData('azure_sql', async (sql) => {
-          const req = this.pool.request();
-          await req.query(sql);
-        });
+        try {
+          await this.ensureConnected();
+          console.info('[db] azure_sql bootstrap start');
+          await ensureSchema('azure_sql', async (sql) => {
+            const req = this.pool.request();
+            await req.query(sql);
+          });
+          await ensureSeedData('azure_sql', async (sql) => {
+            const req = this.pool.request();
+            await req.query(sql);
+          });
+          console.info('[db] azure_sql bootstrap done');
+        } catch (error) {
+          this.initPromise = null;
+          throw error;
+        }
       })();
     }
     await this.initPromise;
