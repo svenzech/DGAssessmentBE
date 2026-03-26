@@ -1,3 +1,6 @@
+import crypto from 'node:crypto';
+import { ensureSchema, ensureSeedData } from './bootstrap';
+
 type Filter =
   | { kind: 'eq'; column: string; value: any }
   | { kind: 'in'; column: string; values: any[] }
@@ -21,6 +24,33 @@ interface SqlAdapter {
   paramRef(index: number): string;
   ilikeExpr(quotedColumn: string, paramRef: string): string;
   mutationReturningClause(columns: string[]): string;
+}
+
+const TABLES_WITH_APP_GENERATED_ID = new Set<string>([
+  'domains',
+  'briefs',
+  'overleitung_sheets',
+  'sheet_questions',
+  'brief_sheet_findings',
+  'brief_sheet_evaluations',
+  'users',
+  'interviews',
+  'answers',
+]);
+
+function withGeneratedId(table: string, row: Record<string, any>): Record<string, any> {
+  if (!TABLES_WITH_APP_GENERATED_ID.has(table)) return row;
+  if (row.id !== undefined && row.id !== null && String(row.id).trim().length > 0) {
+    return row;
+  }
+  return { ...row, id: crypto.randomUUID() };
+}
+
+function normalizeRowsForWrite(
+  table: string,
+  rows: Record<string, any>[],
+): Record<string, any>[] {
+  return rows.map((row) => withGeneratedId(table, row));
 }
 
 function toError(err: unknown): { message: string } {
@@ -49,6 +79,7 @@ async function dynamicImport(moduleName: string): Promise<any> {
 
 class PostgresAdapter implements SqlAdapter {
   private pool: any = null;
+  private initPromise: Promise<void> | null = null;
 
   constructor(private readonly connectionString: string) {}
 
@@ -63,8 +94,23 @@ class PostgresAdapter implements SqlAdapter {
     }
   }
 
+  private async ensureInitialized() {
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        await this.ensurePool();
+        await ensureSchema('postgres', async (sql) => {
+          await this.pool.query(sql);
+        });
+        await ensureSeedData('postgres', async (sql) => {
+          await this.pool.query(sql);
+        });
+      })();
+    }
+    await this.initPromise;
+  }
+
   async query(sql: string, params: any[]): Promise<any[]> {
-    await this.ensurePool();
+    await this.ensureInitialized();
     const res = await this.pool.query(sql, params);
     return res.rows;
   }
@@ -91,6 +137,7 @@ class PostgresAdapter implements SqlAdapter {
 class AzureSqlAdapter implements SqlAdapter {
   private sql: any = null;
   private pool: any = null;
+  private initPromise: Promise<void> | null = null;
 
   constructor(private readonly connectionString: string) {}
 
@@ -106,8 +153,25 @@ class AzureSqlAdapter implements SqlAdapter {
     }
   }
 
+  private async ensureInitialized() {
+    if (!this.initPromise) {
+      this.initPromise = (async () => {
+        await this.ensureConnected();
+        await ensureSchema('azure_sql', async (sql) => {
+          const req = this.pool.request();
+          await req.query(sql);
+        });
+        await ensureSeedData('azure_sql', async (sql) => {
+          const req = this.pool.request();
+          await req.query(sql);
+        });
+      })();
+    }
+    await this.initPromise;
+  }
+
   async query(sql: string, params: any[]): Promise<any[]> {
-    await this.ensureConnected();
+    await this.ensureInitialized();
     const req = this.pool.request();
     params.forEach((value, index) => req.input(`p${index + 1}`, this.normalizeParam(value)));
     const result = await req.query(sql);
@@ -323,7 +387,10 @@ class SqlQueryBuilder implements PromiseLike<QueryResponse<any>> {
   }
 
   private async executeInsert(): Promise<any[]> {
-    const rows = ensureObjectArray(this.payload || []);
+    const rows = normalizeRowsForWrite(
+      this.table,
+      ensureObjectArray(this.payload || []),
+    );
     if (rows.length === 0) return [];
 
     const columns = Array.from(new Set(rows.flatMap((r) => Object.keys(r).filter((k) => r[k] !== undefined))));
@@ -384,7 +451,10 @@ class SqlQueryBuilder implements PromiseLike<QueryResponse<any>> {
   }
 
   private async executeUpsert(): Promise<any[]> {
-    const rows = ensureObjectArray(this.payload || []);
+    const rows = normalizeRowsForWrite(
+      this.table,
+      ensureObjectArray(this.payload || []),
+    );
     if (rows.length === 0) return [];
 
     const conflictColumns = (this.upsertOptions.onConflict || '')
@@ -414,7 +484,9 @@ class SqlQueryBuilder implements PromiseLike<QueryResponse<any>> {
       groups.push(`(${refs.join(', ')})`);
     }
 
-    const updateColumns = columns.filter((c) => !conflictColumns.includes(c));
+    const updateColumns = columns.filter(
+      (c) => !conflictColumns.includes(c) && c !== 'id',
+    );
     const setClause =
       updateColumns.length > 0
         ? ` DO UPDATE SET ${updateColumns
@@ -441,7 +513,9 @@ class SqlQueryBuilder implements PromiseLike<QueryResponse<any>> {
       const params: any[] = [];
       let idx = 1;
       const sourceParts: string[] = [];
-      const updateCols = columns.filter((c) => !conflictColumns.includes(c));
+      const updateCols = columns.filter(
+        (c) => !conflictColumns.includes(c) && c !== 'id',
+      );
 
       for (const col of columns) {
         sourceParts.push(`${this.adapter.paramRef(idx)} AS ${this.adapter.quoteId(col)}`);
