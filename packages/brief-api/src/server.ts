@@ -14,6 +14,7 @@ import { domainsRouter } from './server/routes/domains';
 import { briefsRouter } from './server/routes/briefs';
 import { sheetsRouter } from './server/routes/sheets';
 import { createUploadsRouter } from './server/routes/uploads';
+import { createAzureOpenAiShimRouter } from './server/routes/azure_openai_shim';
 
 // Pfade bestimmen
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -74,6 +75,7 @@ app.use(
     chatflowId: FLOWISE_CHATFLOW_ID,
   }),
 );
+app.use(createAzureOpenAiShimRouter());
 app.use(domainsRouter);
 app.use(briefsRouter);
 app.use(sheetsRouter);
