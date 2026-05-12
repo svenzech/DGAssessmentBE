@@ -4,6 +4,7 @@
 // plus Scorecard / Evaluate für Brief/Sheet.
 
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { supabase } from '../../supabase_client';
 import { evaluateBriefSheet } from '../../../../brief-parser/src/evaluate_brief_sheet';
 
@@ -221,7 +222,7 @@ sheetsRouter.put('/api/sheets/:sheetId/questions', async (req, res) => {
     const existingIds = new Set((existing ?? []).map((r: any) => r.id as string));
 
     type IncomingQuestion = {
-      id?: string;
+      id?: string | null;
       code: string;
       question: string;
       checkpoints: string[];
@@ -234,10 +235,14 @@ sheetsRouter.put('/api/sheets/:sheetId/questions', async (req, res) => {
 
     let idx = 0;
     for (const q of questions as IncomingQuestion[]) {
-      const id = q.id && String(q.id).length > 0 ? String(q.id) : undefined;
+      const incomingId =
+        typeof q.id === 'string' && q.id.trim().length > 0
+          ? q.id.trim()
+          : null;
+      const id = incomingId ?? randomUUID();
 
-      if (id) {
-        seenIds.add(id);
+      if (incomingId) {
+        seenIds.add(incomingId);
       }
 
       toUpsert.push({
