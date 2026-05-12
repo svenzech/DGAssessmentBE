@@ -201,20 +201,6 @@ sheetsRouter.delete('/api/sheets/:sheetId', async (req, res) => {
       });
     }
 
-    const { data: questionRows, error: questionErr } = await supabase
-      .from('sheet_questions')
-      .select('id')
-      .eq('sheet_id', sheetId);
-
-    if (questionErr) {
-      console.error('Fehler beim Laden abhängiger Fragen vor DELETE:', questionErr);
-      return res.status(500).json({ error: questionErr.message });
-    }
-
-    const questionIds = (questionRows ?? [])
-      .map((row: any) => row.id)
-      .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
-
     const { error: evaluationsErr } = await supabase
       .from('brief_sheet_evaluations')
       .delete()
@@ -239,21 +225,6 @@ sheetsRouter.delete('/api/sheets/:sheetId', async (req, res) => {
         findingsErr,
       );
       return res.status(500).json({ error: findingsErr.message });
-    }
-
-    if (questionIds.length > 0) {
-      const { error: answersErr } = await supabase
-        .from('answers')
-        .update({ question_id: null })
-        .in('question_id', questionIds);
-
-      if (answersErr) {
-        console.error(
-          'Fehler beim Lösen abhängiger Antworten in DELETE /api/sheets/:sheetId:',
-          answersErr,
-        );
-        return res.status(500).json({ error: answersErr.message });
-      }
     }
 
     const { error: questionsDeleteErr } = await supabase
