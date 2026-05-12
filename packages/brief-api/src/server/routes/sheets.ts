@@ -235,14 +235,16 @@ sheetsRouter.put('/api/sheets/:sheetId/questions', async (req, res) => {
 
     let idx = 0;
     for (const q of questions as IncomingQuestion[]) {
-      const incomingId =
+      const candidateId =
         typeof q.id === 'string' && q.id.trim().length > 0
           ? q.id.trim()
           : null;
-      const id = incomingId ?? randomUUID();
+      const existingId =
+        candidateId && existingIds.has(candidateId) ? candidateId : null;
+      const id = existingId ?? randomUUID();
 
-      if (incomingId) {
-        seenIds.add(incomingId);
+      if (existingId) {
+        seenIds.add(existingId);
       }
 
       toUpsert.push({
