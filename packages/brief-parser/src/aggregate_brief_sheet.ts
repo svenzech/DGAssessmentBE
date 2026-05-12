@@ -151,7 +151,7 @@ async function loadQuestions(sheetId: string) {
 async function loadBaselineFindings(briefId: string, sheetId: string) {
   const { data, error } = await sb
     .from('brief_sheet_findings')
-    .select('question_id, finding_json')
+    .select('id, question_id, finding_json')
     .eq('brief_id', briefId)
     .eq('sheet_id', sheetId)
 
@@ -161,13 +161,17 @@ async function loadBaselineFindings(briefId: string, sheetId: string) {
     )
   }
 
-  const map = new Map<string, any>()
+  const byQuestionId = new Map<string, any>()
+  const questionIdByFindingId = new Map<string, string>()
   for (const row of (data as any[]) ?? []) {
     if (row.question_id) {
-      map.set(row.question_id as string, row.finding_json)
+      byQuestionId.set(row.question_id as string, row.finding_json)
+      if (row.id) {
+        questionIdByFindingId.set(row.id as string, row.question_id as string)
+      }
     }
   }
-  return map
+  return { byQuestionId, questionIdByFindingId }
 }
 
 async function loadInterviewsForBrief(briefId: string) {
@@ -225,6 +229,8 @@ export async function aggregateBriefSheetEvidence(
   const sheet = await loadSheet(sheetId)
   const questions = await loadQuestions(sheetId)
   const baselineMap = await loadBaselineFindings(briefId, sheetId)
+  const questionCodeById = new Map(questions.map((q) => [q.id, q.code]))
+  const questionCodes = new Set(questions.map((q) => q.code))
 
   // 2) Interviews + Antworten
   const interviews = await loadInterviewsForBrief(briefId)
@@ -241,14 +247,32 @@ export async function aggregateBriefSheetEvidence(
     if (!maxTs || ts > maxTs) maxTs = ts
   }
 
-  // 4) Interview-Antworten grob nach Frage-Codes gruppieren (falls answer_json.question_code existiert)
-  //    Wenn eine Antwort keinen question_code hat, hängen wir sie später an alle Fragen dran (oder ignorieren sie – vorerst: ignorieren)
+  // 4) Interview-Antworten nach Leitfrage gruppieren.
+  // Neue Chat-Antworten enthalten finding_id; ältere oder manuelle Daten können
+  // question_id oder question_code enthalten.
   const answersByQuestionCode = new Map<string, AggregatedAnswer[]>()
 
   for (const a of answers) {
-    // Annahme: der Chat speichert in answer_json ein Feld question_code,
-    // das mit sheet_questions.code übereinstimmt.
-    const code = (a.answer_json && a.answer_json.question_code) as string | undefined
+    const answerJson = a.answer_json ?? {}
+
+    if (answerJson.sheet_id && answerJson.sheet_id !== sheetId) {
+      continue
+    }
+
+    const questionIdFromFinding =
+      typeof answerJson.finding_id === 'string'
+        ? baselineMap.questionIdByFindingId.get(answerJson.finding_id)
+        : null
+    const questionId =
+      typeof answerJson.question_id === 'string'
+        ? answerJson.question_id
+        : questionIdFromFinding
+    const code =
+      typeof answerJson.question_code === 'string'
+        ? answerJson.question_code
+        : questionId
+        ? questionCodeById.get(questionId)
+        : undefined
 
     const base: AggregatedAnswer = {
       answer_id: a.id,
@@ -257,20 +281,16 @@ export async function aggregateBriefSheetEvidence(
       answer_json: a.answer_json
     }
 
-    if (code) {
+    if (code && questionCodes.has(code)) {
       const list = answersByQuestionCode.get(code) ?? []
       list.push(base)
       answersByQuestionCode.set(code, list)
-    } else {
-      // Für den Moment ignorieren wir Antworten ohne question_code;
-      // später könnten wir sie separat in die LLM-Eingabe hängen.
-      // console.warn('Antwort ohne question_code, wird nicht einer konkreten Leitfrage zugeordnet:', a.id)
     }
   }
 
   // 5) Aufbau der Aggregationsstruktur pro Leitfrage
   const questionAggregates: AggregatedQuestionEvidence[] = questions.map((q) => {
-    const baseline = baselineMap.get(q.id) ?? null
+    const baseline = baselineMap.byQuestionId.get(q.id) ?? null
     const answersForQuestion = answersByQuestionCode.get(q.code) ?? []
 
     return {

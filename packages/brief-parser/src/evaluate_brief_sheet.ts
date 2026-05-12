@@ -8,6 +8,7 @@ import { createChatCompletion, defaultLlmModel } from './llm/provider';
 
 // Aggregator wiederverwenden
 import { aggregateBriefSheetEvidence } from './aggregate_brief_sheet'
+import { parseBriefForSheet } from './parse_brief'
 
 
 // === Pfade & ENV wie in parse_brief ===
@@ -76,13 +77,18 @@ async function callScorecardLLM(aggregateJson: any) {
  *  - gibt die Scorecard zurück (Persistenz kann später ergänzt werden)
  */
 export async function evaluateBriefSheet(briefId: string, sheetId: string) {
-    // 1) Evidenz aggregieren (Steckbrief + findings + Interviews + Antworten)
+    // 1) Baseline-Findings aus dem aktuellen Steckbrief erzeugen/aktualisieren.
+    // Die Scorecard baut auf brief_sheet_findings auf; ohne diesen Schritt
+    // hätte eine erste Auswertung keine Baseline.
+    await parseBriefForSheet(briefId, sheetId)
+
+    // 2) Evidenz aggregieren (Steckbrief + findings + Interviews + Antworten)
     const aggregate = await aggregateBriefSheetEvidence(briefId, sheetId)
 
-    // 2) Scorecard berechnen
+    // 3) Scorecard berechnen
     const scorecard = await callScorecardLLM(aggregate)
 
-    // 3) Scorecard in brief_sheet_evaluations speichern
+    // 4) Scorecard in brief_sheet_evaluations speichern
     const { data: insertedEval, error: evalErr } = await sb
     .from('brief_sheet_evaluations')
     .insert({

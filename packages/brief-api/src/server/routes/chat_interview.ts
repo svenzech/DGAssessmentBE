@@ -248,6 +248,8 @@ chatInterviewRouter.post('/api/interview/chat', async (req, res) => {
 
             // Leitfrage-Mapping (für spätere Auswertung)
             finding_id: answeredFindingId,
+            question_id: matchedItem?.question_id ?? null,
+            question_code: matchedItem?.question_code ?? null,
             theme: matchedItem?.theme ?? null,
             sheet_id: matchedItem?.sheet_id ?? null,
             sheet_name: matchedItem?.sheet_name ?? null,

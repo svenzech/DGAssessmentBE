@@ -28,6 +28,8 @@ export interface LeanFinding {
   sheet_id: string | null;
   sheet_name: string | null;
   theme: string | null;
+  question_id: string;
+  question_code: string | null;
   question: string;
   score_1_5: number | null;
   rationale: string | null;
@@ -179,6 +181,8 @@ export async function loadLeanContext(
       sheet_id: sheetRel?.id ?? null,
       sheet_name: sheetRel?.name ?? null,
       theme: sheetRel?.theme ?? null,
+      question_id: questionRel?.id ?? row.question_id,
+      question_code: questionRel?.code ?? null,
       question: questionRel?.question ?? '',
       score_1_5,
       rationale,
