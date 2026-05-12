@@ -3,6 +3,7 @@
 // Upload-/Ingest-Routen.
 
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import multer from 'multer';
 import { supabase } from '../../supabase_client';
 import { classifyAndExtractUpload } from '../../llm_upload_parser';
@@ -155,6 +156,7 @@ export function createUploadsRouter(config: UploadsConfig) {
 
         for (const q of parseResult.questions) {
           const { error: qErr } = await supabase.from('sheet_questions').insert({
+            id: randomUUID(),
             sheet_id: sheetId,
             code: q.code,
             question: q.question,
@@ -334,6 +336,7 @@ export function createUploadsRouter(config: UploadsConfig) {
 
         for (const q of parseResult.questions) {
           const { error: qErr } = await supabase.from('sheet_questions').insert({
+            id: randomUUID(),
             sheet_id: sheetId,
             code: q.code,
             question: q.question,
