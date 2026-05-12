@@ -18,10 +18,12 @@ import { createAzureOpenAiShimRouter } from './server/routes/azure_openai_shim';
 
 // Pfade bestimmen
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..', '..');
+const PACKAGE_ROOT = path.resolve(__dirname, '..', '..');
+const PROJECT_ROOT = path.resolve(__dirname, '..', '..', '..');
 
-// .env im Repo-Root laden
-dotenv.config({ path: path.join(ROOT, '.env') });
+// .env im Repo-Root laden (hier liegen SUPABASE_URL, FLOWISE_TARGET etc.)
+dotenv.config({ path: path.join(PROJECT_ROOT, '.env') });
+dotenv.config({ path: path.join(PACKAGE_ROOT, '.env') });
 
 const API_PORT = Number(process.env.PORT ?? process.env.BRIEF_API_PORT ?? 4000);
 
