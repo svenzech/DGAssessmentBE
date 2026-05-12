@@ -55,7 +55,6 @@ export interface FindingForInterview {
 
 export interface AnswerRecord {
   id: string;
-  question_id: string | null;
   answer_json: any;
   created_at: string;
 }
@@ -215,7 +214,7 @@ async function loadAnswersForInterview(
 ): Promise<AnswerRecord[]> {
   const { data, error } = await sb
     .from('answers')
-    .select('id, question_id, answer_json, created_at')
+    .select('id, answer_json, created_at')
     .eq('interview_id', interviewId)
     .order('created_at', { ascending: true });
 

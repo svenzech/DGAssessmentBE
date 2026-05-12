@@ -7,8 +7,11 @@ const BUSINESS_IMPACT_SHEET_ID = 'sheet-business-impact-v1';
 
 const POSTGRES_SCHEMA_SQL: string[] = [
   `
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+`,
+  `
 CREATE TABLE IF NOT EXISTS domains (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   name TEXT NOT NULL UNIQUE,
   description TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -17,11 +20,11 @@ CREATE TABLE IF NOT EXISTS domains (
 `,
   `
 CREATE TABLE IF NOT EXISTS briefs (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   domain_id TEXT NOT NULL REFERENCES domains(id),
   title TEXT NULL,
-  status TEXT NULL,
-  version INTEGER NULL,
+  status TEXT NULL DEFAULT 'draft',
+  version INTEGER NULL DEFAULT 1,
   raw_markdown TEXT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -32,25 +35,28 @@ CREATE INDEX IF NOT EXISTS idx_briefs_domain_id ON briefs(domain_id);
 `,
   `
 CREATE TABLE IF NOT EXISTS overleitung_sheets (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   name TEXT NULL,
   theme TEXT NULL,
-  status TEXT NULL,
-  version INTEGER NULL,
+  status TEXT NULL DEFAULT 'active',
+  version INTEGER NULL DEFAULT 1,
   theme_target_description TEXT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `,
   `
 CREATE TABLE IF NOT EXISTS sheet_questions (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   sheet_id TEXT NOT NULL REFERENCES overleitung_sheets(id),
   code TEXT NULL,
   question TEXT NULL,
-  checkpoints JSONB NULL,
-  order_index INTEGER NULL,
+  checkpoints JSONB NULL DEFAULT '[]'::jsonb,
+  order_index INTEGER NULL DEFAULT 0,
   active BOOLEAN NOT NULL DEFAULT TRUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  max_score INTEGER NOT NULL DEFAULT 5,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 `,
   `
@@ -59,7 +65,7 @@ CREATE INDEX IF NOT EXISTS idx_sheet_questions_sheet_id_order
 `,
   `
 CREATE TABLE IF NOT EXISTS brief_sheet_findings (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   brief_id TEXT NOT NULL REFERENCES briefs(id),
   sheet_id TEXT NOT NULL REFERENCES overleitung_sheets(id),
   question_id TEXT NOT NULL REFERENCES sheet_questions(id),
@@ -71,7 +77,7 @@ CREATE TABLE IF NOT EXISTS brief_sheet_findings (
 `,
   `
 CREATE TABLE IF NOT EXISTS brief_sheet_evaluations (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   brief_id TEXT NOT NULL REFERENCES briefs(id),
   sheet_id TEXT NOT NULL REFERENCES overleitung_sheets(id),
   source TEXT NULL,
@@ -94,7 +100,7 @@ CREATE TABLE IF NOT EXISTS user_domain_map (
 `,
   `
 CREATE TABLE IF NOT EXISTS interviews (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   user_id TEXT NOT NULL REFERENCES users(id),
   domain_id TEXT NULL REFERENCES domains(id),
   brief_id TEXT NOT NULL REFERENCES briefs(id),
@@ -111,9 +117,8 @@ CREATE INDEX IF NOT EXISTS idx_interviews_user_status
 `,
   `
 CREATE TABLE IF NOT EXISTS answers (
-  id TEXT PRIMARY KEY,
+  id TEXT PRIMARY KEY DEFAULT (gen_random_uuid())::text,
   interview_id TEXT NOT NULL REFERENCES interviews(id),
-  question_id TEXT NULL REFERENCES sheet_questions(id),
   answer_json JSONB NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
