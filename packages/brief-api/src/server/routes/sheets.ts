@@ -143,8 +143,132 @@ sheetsRouter.put('/api/sheets/:sheetId', async (req, res) => {
 // Sheet löschen
 sheetsRouter.delete('/api/sheets/:sheetId', async (req, res) => {
   const { sheetId } = req.params;
+  const force =
+    req.query.force === 'true' ||
+    req.query.force === '1' ||
+    req.query.confirm === 'true';
 
   try {
+    const { data: sheet, error: sheetErr } = await supabase
+      .from('overleitung_sheets')
+      .select('id')
+      .eq('id', sheetId)
+      .maybeSingle();
+
+    if (sheetErr) {
+      console.error('Fehler beim Laden des Sheets vor DELETE:', sheetErr);
+      return res.status(500).json({ error: sheetErr.message });
+    }
+
+    if (!sheet) {
+      return res.status(404).json({ error: 'Sheet nicht gefunden' });
+    }
+
+    const { count: evaluationCount, error: evaluationCountErr } =
+      await supabase
+        .from('brief_sheet_evaluations')
+        .select('id', { count: 'exact', head: true })
+        .eq('sheet_id', sheetId);
+
+    if (evaluationCountErr) {
+      console.error(
+        'Fehler beim Zählen abhängiger Auswertungen vor DELETE:',
+        evaluationCountErr,
+      );
+      return res.status(500).json({ error: evaluationCountErr.message });
+    }
+
+    const { count: findingCount, error: findingCountErr } = await supabase
+      .from('brief_sheet_findings')
+      .select('id', { count: 'exact', head: true })
+      .eq('sheet_id', sheetId);
+
+    if (findingCountErr) {
+      console.error(
+        'Fehler beim Zählen abhängiger Baseline-Findings vor DELETE:',
+        findingCountErr,
+      );
+      return res.status(500).json({ error: findingCountErr.message });
+    }
+
+    if ((evaluationCount ?? 0) > 0 && !force) {
+      return res.status(409).json({
+        error: 'sheet_has_evaluations',
+        message:
+          'Für dieses Überleitungssheet existieren gespeicherte Auswertungen.',
+        evaluations_count: evaluationCount ?? 0,
+        findings_count: findingCount ?? 0,
+      });
+    }
+
+    const { data: questionRows, error: questionErr } = await supabase
+      .from('sheet_questions')
+      .select('id')
+      .eq('sheet_id', sheetId);
+
+    if (questionErr) {
+      console.error('Fehler beim Laden abhängiger Fragen vor DELETE:', questionErr);
+      return res.status(500).json({ error: questionErr.message });
+    }
+
+    const questionIds = (questionRows ?? [])
+      .map((row: any) => row.id)
+      .filter((id: any): id is string => typeof id === 'string' && id.length > 0);
+
+    const { error: evaluationsErr } = await supabase
+      .from('brief_sheet_evaluations')
+      .delete()
+      .eq('sheet_id', sheetId);
+
+    if (evaluationsErr) {
+      console.error(
+        'Fehler beim Löschen abhängiger Auswertungen in DELETE /api/sheets/:sheetId:',
+        evaluationsErr,
+      );
+      return res.status(500).json({ error: evaluationsErr.message });
+    }
+
+    const { error: findingsErr } = await supabase
+      .from('brief_sheet_findings')
+      .delete()
+      .eq('sheet_id', sheetId);
+
+    if (findingsErr) {
+      console.error(
+        'Fehler beim Löschen abhängiger Baseline-Findings in DELETE /api/sheets/:sheetId:',
+        findingsErr,
+      );
+      return res.status(500).json({ error: findingsErr.message });
+    }
+
+    if (questionIds.length > 0) {
+      const { error: answersErr } = await supabase
+        .from('answers')
+        .update({ question_id: null })
+        .in('question_id', questionIds);
+
+      if (answersErr) {
+        console.error(
+          'Fehler beim Lösen abhängiger Antworten in DELETE /api/sheets/:sheetId:',
+          answersErr,
+        );
+        return res.status(500).json({ error: answersErr.message });
+      }
+    }
+
+    const { error: questionsDeleteErr } = await supabase
+      .from('sheet_questions')
+      .delete()
+      .eq('sheet_id', sheetId);
+
+    if (questionsDeleteErr) {
+      console.error(
+        'Fehler beim Löschen abhängiger Fragen in DELETE /api/sheets/:sheetId:',
+        questionsDeleteErr,
+      );
+      return res.status(500).json({ error: questionsDeleteErr.message });
+    }
+
     const { error } = await supabase
       .from('overleitung_sheets')
       .delete()
